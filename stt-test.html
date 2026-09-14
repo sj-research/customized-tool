@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>음성 인식 테스트</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; font-size: 16px; color: #222; background: #fafafa; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  h2 { font-size: 15px; margin: 20px 0 6px; color: #555; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
+  .env div { margin: 2px 0; font-size: 14px; }
+  .ok { color: #1a7f37; font-weight: 600; }
+  .ng { color: #c62828; font-weight: 600; }
+  button { width: 100%; padding: 18px; font-size: 18px; font-weight: 600; border: none; border-radius: 12px; margin-top: 12px; }
+  #start { background: #1f3a5f; color: #fff; }
+  #stop { background: #c62828; color: #fff; }
+  button:disabled { opacity: .35; }
+  #status { margin-top: 10px; font-weight: 600; }
+  #final { min-height: 90px; white-space: pre-wrap; line-height: 1.6; }
+  #interim { color: #888; min-height: 24px; }
+  #log { font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; max-height: 260px; overflow-y: auto; }
+  .sample { font-size: 14px; line-height: 1.6; color: #444; }
+</style>
+</head>
+<body>
+<h1>아이폰 음성 인식 테스트</h1>
+
+<div class="card env" id="env"></div>
+
+<h2>읽어볼 문장 (현장 말투로 편하게)</h2>
+<div class="card sample">
+  우리포차 카스 POCM이랑 참이슬 POCM 붙어 있고 테라 가판도 있음. 생맥주 사천 원 프로모션 하고 카스 생맥주 기계 입점해 있음. 야장 꽉 차 있고 사장님은 여섯 시에 오신대.
+</div>
+
+<button id="start">녹음 시작</button>
+<button id="stop" disabled>중지</button>
+<div id="status">대기 중</div>
+
+<h2>인식 결과 (확정)</h2>
+<div class="card" id="final"></div>
+<h2>인식 중 (미확정)</h2>
+<div class="card" id="interim"></div>
+
+<h2>이벤트 기록</h2>
+<div class="card" id="log"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, startedAt = 0, userStopped = false, finalText = "";
+
+function log(msg) {
+  const t = startedAt ? ((Date.now() - startedAt) / 1000).toFixed(1) + "초" : "-";
+  $("log").textContent += `[${t}] ${msg}\n`;
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+function envRow(label, value, good) {
+  const cls = good === undefined ? "" : good ? "ok" : "ng";
+  return `<div>${label}: <span class="${cls}">${value}</span></div>`;
+}
+
+$("env").innerHTML = [
+  envRow("음성 인식 지원", SR ? "지원" : "미지원", !!SR),
+  envRow("보안 주소(https)", window.isSecureContext ? "예" : "아니오", window.isSecureContext),
+  envRow("홈 화면 앱으로 실행", navigator.standalone ? "예" : "아니오 (사파리 탭)"),
+  envRow("브라우저", navigator.userAgent.replace(/^Mozilla\/5\.0 /, "")),
+].join("");
+
+if (!SR) {
+  $("start").disabled = true;
+  $("status").textContent = "이 브라우저는 음성 인식을 지원하지 않습니다";
+}
+
+$("start").onclick = () => {
+  finalText = "";
+  $("final").textContent = "";
+  $("interim").textContent = "";
+  $("log").textContent = "";
+  userStopped = false;
+  startedAt = Date.now();
+
+  rec = new SR();
+  rec.lang = "ko-KR";
+  rec.continuous = true;
+  rec.interimResults = true;
+
+  ["start", "audiostart", "soundstart", "speechstart", "speechend", "soundend", "audioend", "nomatch"]
+    .forEach(ev => rec.addEventListener(ev, () => log(ev)));
+
+  rec.onresult = e => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) {
+        finalText += r[0].transcript + "\n";
+        log(`확정 (신뢰도 ${r[0].confidence ? r[0].confidence.toFixed(2) : "없음"}): ${r[0].transcript}`);
+      } else {
+        interim += r[0].transcript;
+      }
+    }
+    $("final").textContent = finalText;
+    $("interim").textContent = interim;
+  };
+
+  rec.onerror = e => {
+    log(`오류: ${e.error}${e.message ? " " + e.message : ""}`);
+    $("status").textContent = `오류: ${e.error}`;
+  };
+
+  rec.onend = () => {
+    const sec = ((Date.now() - startedAt) / 1000).toFixed(1);
+    log(userStopped ? "end (직접 중지)" : "end (자동으로 끊김)");
+    $("status").textContent = userStopped ? `중지됨. ${sec}초` : `자동으로 끊겼습니다. ${sec}초 경과`;
+    $("start").disabled = false;
+    $("stop").disabled = true;
+  };
+
+  try {
+    rec.start();
+    $("status").textContent = "듣는 중. 말해보세요";
+    $("start").disabled = true;
+    $("stop").disabled = false;
+  } catch (err) {
+    log("start 실패: " + err.message);
+    $("status").textContent = "시작 실패: " + err.message;
+  }
+};
+
+$("stop").onclick = () => {
+  userStopped = true;
+  if (rec) rec.stop();
+};
+</script>
+</body>
+</html>
