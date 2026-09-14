@@ -5,12 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>준비 모드</title>
-<link rel="stylesheet" href="css/prep.css">
+<link rel="stylesheet" href="css/prep.css?v=0.3.1">
+<script>
+  // 아이폰에는 개발자 도구가 없어서, 스크립트 오류를 화면 맨 위에 보여준다
+  window.APP_VERSION = "0.3.1";
+  function showFatal(msg) {
+    var el = document.getElementById("fatal");
+    if (!el) { el = document.createElement("div"); el.id = "fatal"; document.documentElement.appendChild(el); }
+    el.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99;background:#b3261e;color:#fff;padding:10px;font:13px/1.4 sans-serif;white-space:pre-wrap";
+    el.textContent = "오류 (v" + window.APP_VERSION + "): " + msg;
+  }
+  window.addEventListener("error", function (e) { showFatal(e.message + (e.filename ? "\n" + e.filename.split("/").pop() + ":" + e.lineno : "")); });
+  window.addEventListener("unhandledrejection", function (e) { showFatal(String(e.reason && e.reason.message || e.reason)); });
+</script>
 </head>
 <body>
 <header class="top">
   <div class="title">
-    <b>준비 모드</b>
+    <b>준비 모드 <small class="muted">v0.3.1</small></b>
     <span id="dataInfo" class="muted small">불러오는 중</span>
   </div>
   <div class="search-wrap">
@@ -79,7 +91,7 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="js/common.js"></script>
-<script src="js/prep.js"></script>
+<script src="js/common.js?v=0.3.1"></script>
+<script src="js/prep.js?v=0.3.1"></script>
 </body>
 </html>

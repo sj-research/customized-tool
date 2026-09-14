@@ -463,4 +463,4 @@ async function start() {
   setSheet("min");
 }
 
-start();
+start().catch(err => (window.showFatal ? showFatal(err.message || String(err)) : alert(err)));
