@@ -10,8 +10,10 @@
  *   Content-Type 헤더를 따로 붙이지 않는다. 붙이면 브라우저 사전 요청 때문에 막힐 수 있다
  */
 
-const API_VERSION = "0.1";
+const API_VERSION = "0.2";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
+// 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
+const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog"];
 const TIMEZONE = "Asia/Seoul";
 
 /** 브라우저로 주소를 열었을 때 확인용. 데이터는 돌려주지 않는다 */
@@ -44,8 +46,9 @@ function doPost(e) {
           ok: true,
           version: API_VERSION,
           fetchedAt: formatDate_(new Date(), true),
-          data: READ_SHEETS.reduce((acc, name) => {
-            acc[name] = readSheet_(name);
+          data: READ_SHEETS.concat(OPTIONAL_SHEETS).reduce((acc, name) => {
+            const exists = !!SpreadsheetApp.getActive().getSheetByName(name);
+            acc[name] = exists || READ_SHEETS.includes(name) ? readSheet_(name) : [];
             return acc;
           }, {}),
         });
@@ -116,5 +119,92 @@ function resetToken() {
 
 /** 편집기에서 읽기가 되는지 바로 확인할 때 실행한다 */
 function testRead() {
-  READ_SHEETS.forEach(name => Logger.log(`${name}: ${readSheet_(name).length}행`));
+  READ_SHEETS.concat(OPTIONAL_SHEETS).forEach(name => {
+    const exists = !!SpreadsheetApp.getActive().getSheetByName(name);
+    Logger.log(exists ? `${name}: ${readSheet_(name).length}행` : `${name}: 탭 없음`);
+  });
+}
+
+/* ------------------------------------------------------------------
+ * 시트 구조 추가. 편집기에서 한 번 실행한다. 여러 번 실행해도 안전하다
+ * 기존 탭의 데이터는 바꾸지 않는다. 없는 탭, 없는 컬럼, 드롭다운 선택지만 추가한다
+ * ------------------------------------------------------------------ */
+
+const MAX_ROWS = 2000;
+const HEADER_BG = "#1f3a5f";
+
+// 상호명 칸: B열 place_id로 places 상호명을 찾는다. zone_id면 구역명. 한 칸짜리 배열 수식이라 새 행에도 자동 적용된다
+const NAME_ARRAY_FORMULA =
+  '={"상호명";ARRAYFORMULA(IF(B2:B="","",IFERROR(VLOOKUP(B2:B,{places!A:A,places!C:C},2,FALSE),' +
+  'IFERROR(VLOOKUP(B2:B,{zones!A:A,zones!C:C},2,FALSE),"확인필요"))))}';
+
+const NEW_SHEETS = {
+  visits: {
+    headers: ["visit_id", "place_id", "상호명", "방문일시", "plan_id", "방문 결과", "재방문 희망 시각",
+              "검수 상태", "녹음 원문", "구조화 결과", "비고"],
+    formulaCol: 3,
+    lists: { "방문 결과": ["완료", "키맨부재", "브레이크타임", "영업전", "재방문필요"], "검수 상태": ["미검수", "검수완료"] },
+  },
+  routing_plans: {
+    headers: ["plan_id", "날짜", "대상 구역", "방문 순서", "방문 순서 상호명", "실제 방문 순서", "실제 방문 순서 상호명",
+              "메모", "수정일시"],
+    lists: {},
+  },
+};
+
+const PLACE_STATUS = ["미방문", "관측완료", "상담완료", "재방문필요", "제외"];
+
+function setupSchema() {
+  const ss = SpreadsheetApp.getActive();
+  const done = [];
+
+  Object.keys(NEW_SHEETS).forEach(name => {
+    const spec = NEW_SHEETS[name];
+    let sheet = ss.getSheetByName(name);
+    if (sheet) {
+      done.push(`${name}: 이미 있음. 건드리지 않음`);
+      return;
+    }
+    sheet = ss.insertSheet(name);
+    if (sheet.getMaxRows() < MAX_ROWS) sheet.insertRowsAfter(sheet.getMaxRows(), MAX_ROWS - sheet.getMaxRows());
+    const header = sheet.getRange(1, 1, 1, spec.headers.length);
+    header.setValues([spec.headers]).setFontWeight("bold").setFontColor("#ffffff").setBackground(HEADER_BG);
+    sheet.setFrozenRows(1);
+    if (spec.formulaCol) sheet.getRange(1, spec.formulaCol).setFormula(NAME_ARRAY_FORMULA);
+    Object.keys(spec.lists).forEach(col => {
+      const idx = spec.headers.indexOf(col) + 1;
+      setListValidation_(sheet, idx, spec.lists[col]);
+    });
+    done.push(`${name}: 탭 생성`);
+  });
+
+  const places = ss.getSheetByName("places");
+  const statusCol = headerIndex_(places, "진행상태");
+  if (!statusCol) throw new Error("places 탭에 진행상태 컬럼이 없습니다");
+  setListValidation_(places, statusCol, PLACE_STATUS);
+  done.push(`places 진행상태 선택지: ${PLACE_STATUS.join(", ")}`);
+
+  const obs = ss.getSheetByName("observations");
+  if (headerIndex_(obs, "visit_id")) {
+    done.push("observations visit_id: 이미 있음");
+  } else {
+    const col = obs.getLastColumn() + 1;
+    if (obs.getMaxColumns() < col) obs.insertColumnAfter(obs.getMaxColumns());
+    const ref = obs.getRange(1, 1);
+    obs.getRange(1, col).setValue("visit_id")
+      .setFontWeight("bold").setFontColor(ref.getFontColor()).setBackground(ref.getBackground());
+    done.push(`observations visit_id: ${col}번째 컬럼에 추가`);
+  }
+
+  done.forEach(line => Logger.log(line));
+}
+
+function headerIndex_(sheet, name) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  return headers.indexOf(name) + 1;
+}
+
+function setListValidation_(sheet, col, values) {
+  const rule = SpreadsheetApp.newDataValidation().requireValueInList(values, true).setAllowInvalid(false).build();
+  sheet.getRange(2, col, sheet.getMaxRows() - 1, 1).setDataValidation(rule);
 }
