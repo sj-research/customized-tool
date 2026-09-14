@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>준비 모드</title>
+<link rel="stylesheet" href="css/prep.css">
+</head>
+<body>
+<header class="top">
+  <div class="title">
+    <b>준비 모드</b>
+    <span id="dataInfo" class="muted small">불러오는 중</span>
+  </div>
+  <div class="search-wrap">
+    <input id="search" type="search" placeholder="상호명 검색" autocomplete="off">
+    <ul id="searchResults" class="search-results" hidden></ul>
+  </div>
+  <button id="refresh" class="icon" title="데이터 새로 받기">새로고침</button>
+  <button id="openSettings" class="icon" title="설정">설정</button>
+</header>
+
+<main class="layout">
+  <div class="map-wrap">
+    <div id="map"></div>
+    <div id="legend" class="legend"></div>
+  </div>
+
+  <section id="sheet" class="sheet" data-size="min">
+    <button id="handle" class="handle" aria-label="패널 크기 바꾸기"><span></span></button>
+    <nav class="tabs">
+      <button class="tab" data-tab="route">오늘 경로 <span id="routeCount"></span></button>
+      <button class="tab" data-tab="briefing">업장 브리핑</button>
+    </nav>
+
+    <div id="route" class="pane">
+      <h4>대상 구역 <small id="zoneSelLabel" class="muted"></small></h4>
+      <div id="zoneChips" class="chips"></div>
+      <p id="zoneNotice" class="warn" hidden></p>
+
+      <div class="plan-row">
+        <label>날짜 <input id="planDate" type="date"></label>
+        <label>계획 <select id="planSelect"></select></label>
+      </div>
+      <p class="muted small">순서는 직접 정합니다. 앱은 순서를 제안하지 않습니다.</p>
+      <ol id="routeList" class="route-list"></ol>
+      <label class="memo">메모 <input id="planMemo" type="text" placeholder="예: 사장님 6시 출근, 브레이크 타임 3~5시"></label>
+      <div class="plan-actions">
+        <button id="clearRoute" class="secondary">경로 비우기</button>
+        <button id="savePlan" class="primary">계획 저장</button>
+      </div>
+      <p id="saveState" class="muted small"></p>
+
+      <h4>구역 단위 액션</h4>
+      <ul id="zoneActions" class="actions"></ul>
+    </div>
+
+    <div id="briefing" class="pane" hidden>
+      <p class="muted">지도에서 업장을 누르거나 상호명을 검색하세요.</p>
+    </div>
+  </section>
+</main>
+
+<div id="settings" class="modal" hidden>
+  <div class="modal-body">
+    <h3>설정</h3>
+    <p id="settingsMsg" class="warn"></p>
+    <label>Apps Script 웹 앱 URL <input id="setUrl" type="url" autocomplete="off"></label>
+    <label>접근 토큰 <input id="setToken" type="password" autocomplete="off"></label>
+    <label>카카오 JavaScript 키 <input id="setKakao" type="text" autocomplete="off"></label>
+    <p class="muted small">입력값은 이 기기 브라우저에만 저장됩니다. 코드와 저장소에는 올라가지 않습니다.</p>
+    <div class="plan-actions">
+      <button id="closeSettings" class="secondary">닫기</button>
+      <button id="saveSettings" class="primary">저장하고 다시 열기</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/common.js"></script>
+<script src="js/prep.js"></script>
+</body>
+</html>

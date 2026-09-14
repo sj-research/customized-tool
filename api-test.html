@@ -38,6 +38,14 @@
 <h2>결과</h2>
 <div class="card" id="result">대기 중</div>
 
+<h2>구역 경계 올리기 (PC에서)</h2>
+<div class="card">
+  <p class="hint" style="margin-top:0">구역 작도 도구가 저장한 zones.geojson을 고르면 시트 zones 탭의 경계 칸에 기록합니다. 구역을 다시 그렸을 때도 같은 방법으로 갱신합니다.</p>
+  <input id="geojson" type="file" accept=".geojson,.json,application/geo+json,application/json">
+  <div id="geoPreview" class="hint"></div>
+  <button id="uploadGeo" disabled>경계 올리기</button>
+</div>
+
 <script>
 const KEY_URL = "cet.apiUrl", KEY_TOKEN = "cet.apiToken";
 const $ = id => document.getElementById(id);
@@ -90,6 +98,48 @@ async function call(action) {
 
 $("ping").onclick = () => call("ping");
 $("data").onclick = () => call("data");
+
+// zones.geojson(FeatureCollection, 폴리곤마다 properties.zone_id)을 구역별 MultiPolygon으로 묶는다
+let boundaries = null;
+$("geojson").onchange = async e => {
+  boundaries = null;
+  $("uploadGeo").disabled = true;
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const fc = JSON.parse(await file.text());
+    if (fc.type !== "FeatureCollection" || !Array.isArray(fc.features)) throw new Error("FeatureCollection이 아닙니다");
+    const grouped = {};
+    fc.features.forEach((f, i) => {
+      const zoneId = f.properties && f.properties.zone_id;
+      const g = f.geometry || {};
+      if (!zoneId) throw new Error(`${i + 1}번째 폴리곤에 zone_id가 없습니다`);
+      const polys = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : null;
+      if (!polys) throw new Error(`${zoneId} 도형이 Polygon이 아닙니다`);
+      (grouped[zoneId] = grouped[zoneId] || []).push(...polys);
+    });
+    boundaries = {};
+    Object.keys(grouped).sort().forEach(z => { boundaries[z] = { type: "MultiPolygon", coordinates: grouped[z] }; });
+    $("geoPreview").textContent = Object.keys(boundaries).map(z => `${z} 폴리곤 ${boundaries[z].coordinates.length}개`).join(", ");
+    $("uploadGeo").disabled = false;
+  } catch (err) {
+    $("geoPreview").textContent = "파일을 읽을 수 없습니다: " + err.message;
+  }
+};
+
+$("uploadGeo").onclick = async () => {
+  const url = $("url").value.trim(), token = $("token").value.trim();
+  if (!url || !token || !boundaries) return show("URL, 토큰, 파일을 확인하세요", false);
+  $("result").textContent = "경계 올리는 중...";
+  try {
+    const res = await fetch(url, { method: "POST", body: JSON.stringify({ token, action: "setBoundaries", boundaries }) });
+    const body = await res.json();
+    if (!body.ok) return show(`오류: ${body.error}${body.message ? "\n" + body.message : ""}`, false);
+    show(`경계 기록: ${body.updated.join(", ")}${body.unknown.length ? `\nzones에 없는 구역이라 건너뜀: ${body.unknown.join(", ")}` : ""}`, true);
+  } catch (err) {
+    show("요청 실패: " + err.message, false);
+  }
+};
 </script>
 </body>
 </html>
