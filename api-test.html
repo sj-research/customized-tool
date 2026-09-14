@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>시트 연결 테스트</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; font-size: 16px; color: #222; background: #fafafa; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  h2 { font-size: 15px; margin: 20px 0 6px; color: #555; }
+  label { display: block; font-size: 14px; color: #555; margin-top: 10px; }
+  input { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; margin-top: 4px; }
+  button { width: 100%; padding: 16px; font-size: 17px; font-weight: 600; border: none; border-radius: 10px; margin-top: 12px; background: #1f3a5f; color: #fff; }
+  button.secondary { background: #fff; color: #1f3a5f; border: 1px solid #1f3a5f; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
+  #result { white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.5; min-height: 60px; }
+  .ok { color: #1a7f37; font-weight: 600; }
+  .ng { color: #c62828; font-weight: 600; }
+  .hint { font-size: 13px; color: #777; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1>시트 연결 테스트</h1>
+
+<div class="card">
+  <label for="url">Apps Script 웹 앱 URL</label>
+  <input id="url" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+  <label for="token">접근 토큰</label>
+  <input id="token" type="password" placeholder="setupToken 실행 로그의 토큰" autocomplete="off">
+  <p class="hint">입력값은 이 기기 브라우저에만 저장됩니다. 서버나 코드에 올라가지 않습니다.</p>
+  <button id="save" class="secondary">이 기기에 저장</button>
+</div>
+
+<button id="ping">연결 확인</button>
+<button id="data">데이터 읽기</button>
+
+<h2>결과</h2>
+<div class="card" id="result">대기 중</div>
+
+<script>
+const KEY_URL = "cet.apiUrl", KEY_TOKEN = "cet.apiToken";
+const $ = id => document.getElementById(id);
+
+function store(key, value) { try { localStorage.setItem(key, value); } catch (e) {} }
+function load(key) { try { return localStorage.getItem(key) || ""; } catch (e) { return ""; } }
+
+$("url").value = load(KEY_URL);
+$("token").value = load(KEY_TOKEN);
+
+$("save").onclick = () => {
+  store(KEY_URL, $("url").value.trim());
+  store(KEY_TOKEN, $("token").value.trim());
+  show("이 기기에 저장했습니다", true);
+};
+
+function show(text, ok) {
+  $("result").innerHTML = `<span class="${ok ? "ok" : "ng"}">${ok ? "성공" : "실패"}</span>\n` + text;
+}
+
+async function call(action) {
+  const url = $("url").value.trim(), token = $("token").value.trim();
+  if (!url || !token) return show("URL과 토큰을 입력하세요", false);
+  $("result").textContent = "요청 중...";
+  const t0 = performance.now();
+  let res, body;
+  try {
+    // Content-Type 헤더를 붙이지 않는다. 브라우저 사전 요청 없이 보내기 위해서다
+    res = await fetch(url, { method: "POST", body: JSON.stringify({ token, action }) });
+    body = await res.json();
+  } catch (err) {
+    return show(`요청 자체가 실패했습니다: ${err.message}\n\n확인할 것\n1. URL이 /exec 로 끝나는 웹 앱 주소인지\n2. 배포 시 액세스 권한이 '모든 사용자'인지`, false);
+  }
+  const ms = Math.round(performance.now() - t0);
+  if (!body.ok) {
+    const hint = { unauthorized: "토큰이 틀렸거나 setupToken을 실행하지 않았습니다", unknown_action: "코드 버전을 확인하세요" }[body.error] || "";
+    return show(`오류: ${body.error}${body.message ? "\n" + body.message : ""}\n${hint}\n응답 시간 ${ms}ms`, false);
+  }
+  if (action === "ping") {
+    return show(`API 버전 ${body.version}\n서버 시각 ${body.serverTime}\n시트 탭: ${body.sheets.join(", ")}\n응답 시간 ${ms}ms`, true);
+  }
+  const d = body.data;
+  const lines = Object.keys(d).map(k => `${k}: ${d[k].length}행`);
+  const poc = d.places.filter(p => p["대상유형"] === "POC").length;
+  const withCoord = d.places.filter(p => p.lat && p.lng).length;
+  const sample = d.places[0] ? `${d.places[0].place_id} ${d.places[0]["상호명"]} (${d.places[0].zone_id})` : "없음";
+  const obsName = d.observations[0] ? `${d.observations[0].obs_id} → ${d.observations[0]["상호명"]}` : "없음";
+  show(`${lines.join("\n")}\n\nPOC ${poc}곳, 좌표 있음 ${withCoord}곳\nplaces 첫 행: ${sample}\nobservations 상호명 수식: ${obsName}\n읽은 시각 ${body.fetchedAt}\n응답 시간 ${ms}ms`, true);
+}
+
+$("ping").onclick = () => call("ping");
+$("data").onclick = () => call("data");
+</script>
+</body>
+</html>
