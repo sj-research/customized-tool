@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>현장 모드</title>
+<link rel="stylesheet" href="css/prep.css?v=0.4.0">
+<link rel="stylesheet" href="css/field.css?v=0.4.0">
+<script>
+  // 아이폰에는 개발자 도구가 없어서, 스크립트 오류를 화면 맨 위에 보여준다
+  window.APP_VERSION = "0.4.0";
+  function showFatal(msg) {
+    var el = document.getElementById("fatal");
+    if (!el) { el = document.createElement("div"); el.id = "fatal"; document.documentElement.appendChild(el); }
+    el.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99;background:#b3261e;color:#fff;padding:10px;font:13px/1.4 sans-serif;white-space:pre-wrap";
+    el.textContent = "오류 (v" + window.APP_VERSION + "): " + msg;
+  }
+  window.addEventListener("error", function (e) { showFatal(e.message + (e.filename ? "\n" + e.filename.split("/").pop() + ":" + e.lineno : "")); });
+  window.addEventListener("unhandledrejection", function (e) { showFatal(String(e.reason && e.reason.message || e.reason)); });
+</script>
+</head>
+<body class="field">
+<header class="top">
+  <div class="title">
+    <b>현장 모드 <small class="muted">v0.4.0</small></b>
+    <span id="dataInfo" class="muted small">불러오는 중</span>
+  </div>
+  <button id="queueBtn" class="icon queue" hidden></button>
+  <a class="icon" href="prep.html">준비</a>
+  <button id="refresh" class="icon">새로고침</button>
+</header>
+
+<main class="layout">
+  <div class="map-wrap"><div id="map"></div></div>
+  <section id="panel" class="f-panel"><p class="muted">불러오는 중</p></section>
+</main>
+
+<div id="chipModal" class="modal" hidden>
+  <div class="modal-body chip-body">
+    <div class="p-head"><b>관찰 고치기</b><button id="closeChip" class="link">닫기</button></div>
+    <div id="chipBody"></div>
+  </div>
+</div>
+
+<div id="queueModal" class="modal" hidden>
+  <div class="modal-body">
+    <h3>전송 대기</h3>
+    <ul id="queueList" class="queue-list"></ul>
+    <div class="actions-row">
+      <button id="closeQueue" class="secondary">닫기</button>
+      <button id="retryQueue" class="primary">지금 다시 보내기</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/common.js?v=0.4.0"></script>
+<script src="js/field.js?v=0.4.0"></script>
+</body>
+</html>

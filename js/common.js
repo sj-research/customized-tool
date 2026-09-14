@@ -25,17 +25,22 @@ const Api = {
   async call(action, extra = {}) {
     const { url, token } = Store.settings();
     if (!url || !token) throw new Error("설정에서 Apps Script URL과 토큰을 입력하세요");
-    let res;
+    let body;
     try {
       // Content-Type 헤더를 붙이지 않는다. 브라우저 사전 요청 없이 보내기 위해서다
-      res = await fetch(url, { method: "POST", body: JSON.stringify({ token, action, ...extra }) });
+      const res = await fetch(url, { method: "POST", body: JSON.stringify({ token, action, ...extra }) });
+      body = await res.json();
     } catch (err) {
-      throw new Error("서버에 연결하지 못했습니다. 통신 상태를 확인하세요");
+      // 통신이 끊겼거나 응답이 오다 끊긴 경우. 전송 대기열이 나중에 다시 보낸다
+      throw Object.assign(new Error("서버에 연결하지 못했습니다. 통신 상태를 확인하세요"), { network: true, retryable: true });
     }
-    const body = await res.json();
-    if (!body.ok) throw new Error(body.message || body.error);
+    if (!body.ok) {
+      throw Object.assign(new Error(body.message || body.error), { code: body.error, retryable: !!body.retryable });
+    }
     return body;
   },
+  structure(placeId, text) { return this.call("structure", { place_id: placeId, text }); },
+  saveVisit(visit) { return this.call("saveVisit", { visit }); },
   // 개발용: ?fixture=경로 가 있으면 API 대신 로컬 JSON을 읽는다
   async loadData() {
     const fixture = new URLSearchParams(location.search).get("fixture");

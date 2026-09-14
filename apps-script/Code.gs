@@ -14,12 +14,20 @@
  *   data           전체 탭 읽기
  *   setBoundaries  zones 경계 칸에 구역 폴리곤 기록. { boundaries: { Z1: GeoJSON MultiPolygon, ... } }
  *   savePlan       routing_plans 저장. { plan: { plan_id?, date, zones[], order[], actualOrder[], memo } }
+ *   structure      녹음 원문을 Claude로 구조화. 저장하지 않는다. { place_id, text }
+ *   saveVisit      방문 저장. visits 1행, observations 여러 행, places 진행상태 갱신. { visit: {...} }
+ *
+ * 스크립트 속성
+ *   ACCESS_TOKEN       접근 토큰 (setupToken으로 생성)
+ *   ANTHROPIC_API_KEY  Claude API 키. 프로젝트 설정 > 스크립트 속성에 직접 넣는다
+ *   CLAUDE_MODEL       선택. 기본 claude-opus-5
+ *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.3";
+const API_VERSION = "0.4";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
-const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog"];
+const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
 const TIMEZONE = "Asia/Seoul";
 
 /** 브라우저로 주소를 열었을 때 확인용. 데이터는 돌려주지 않는다 */
@@ -62,17 +70,31 @@ function doPost(e) {
         return json_(withLock_(() => setBoundaries_(req.boundaries)));
       case "savePlan":
         return json_(withLock_(() => savePlan_(req.plan)));
+      case "structure":
+        return json_(structure_(req.place_id, req.text));
+      case "saveVisit":
+        return json_(saveVisit_(req.visit));
       default:
         return json_({ ok: false, error: "unknown_action" });
     }
   } catch (err) {
     if (err instanceof InputError) return json_({ ok: false, error: "invalid_input", message: err.message });
+    if (err instanceof ClaudeError) return json_({ ok: false, error: err.code, message: err.message, retryable: err.retryable });
     return json_({ ok: false, error: "server_error", message: String(err) });
   }
 }
 
 /** 요청 값이 잘못됐을 때 쓰는 오류. 서버 오류와 구분해 알려준다 */
 class InputError extends Error {}
+
+/** Claude 호출 오류. retryable이면 앱이 전송 대기열에 두고 나중에 다시 보낸다 */
+class ClaudeError extends Error {
+  constructor(code, message, retryable) {
+    super(message);
+    this.code = code;
+    this.retryable = !!retryable;
+  }
+}
 
 /** 쓰기 요청이 동시에 들어와도 한 번에 하나씩 처리한다 */
 function withLock_(fn) {
@@ -332,4 +354,286 @@ function headerIndex_(sheet, name) {
 function setListValidation_(sheet, col, values) {
   const rule = SpreadsheetApp.newDataValidation().requireValueInList(values, true).setAllowInvalid(false).build();
   sheet.getRange(2, col, sheet.getMaxRows() - 1, 1).setDataValidation(rule);
+}
+
+/* ------------------------------------------------------------------
+ * 현장 모드: 녹음 구조화와 방문 저장
+ * ------------------------------------------------------------------ */
+
+const DEFAULT_MODEL = "claude-opus-5";
+const DEFAULT_EFFORT = "medium";
+const VISIT_RESULTS = ["완료", "키맨부재", "브레이크타임", "영업전", "재방문필요"];
+const MAX_TEXT = 5000;
+
+const nullable_ = schema => ({ anyOf: [schema, { type: "null" }] });
+const enum_ = values => ({ type: "string", enum: values });
+const strArray_ = { type: "array", items: { type: "string" } };
+const YNU_ = enum_(["Y", "N", "미확인"]);
+
+// 관찰 한 행. [스키마 키, observations 탭 컬럼명, 스키마]. 스키마 키는 영문으로 두고 저장할 때 컬럼명으로 옮긴다
+const OBS_FIELDS = [
+  ["method", "조사방식", enum_(["외부관측", "내부진입", "업주인터뷰", "제3자전언"])],
+  ["evidence", "근거유형", enum_(["E1 관측", "E2 추론", "E3 전언"])],
+  ["informant", "전언주체", nullable_(enum_(["업주", "직원", "아르바이트", "인근상인", "상가종사자", "부동산", "기타"]))],
+  ["draft_beer", "생맥주", YNU_],
+  ["bottle_beer", "병맥주", YNU_],
+  ["own_brands", "자사브랜드", strArray_],
+  ["competitor_brands", "경쟁브랜드", strArray_],
+  ["soju_brands", "소주브랜드", strArray_],
+  ["other_drinks", "기타주류", strArray_],
+  ["nab_potential", "NAB적용가능성", nullable_(enum_(["높음", "보통", "낮음", "해당없음"]))],
+  ["pocm", "POCM유무", YNU_],
+  ["pocm_types", "POCM유형", { type: "array", items: enum_(["LED", "포스터", "간판", "앞치마", "가판", "이벤트물"]) }],
+  ["pocm_brands", "POCM브랜드", strArray_],
+  ["pocm_location", "POCM위치", nullable_(enum_(["내부", "외부", "둘 다"]))],
+  ["pocm_density", "POCM밀도", nullable_(enum_(["없음", "소수", "다수"]))],
+  ["stock_evidence", "물증수량", nullable_({ type: "string" })],
+  ["patio", "야장", nullable_(enum_(["Y", "N"]))],
+  ["crowd", "혼잡도", nullable_(enum_(["한산", "보통", "성황"]))],
+  ["waiting", "대기발생", nullable_({ type: "string" })],
+  ["age_groups", "고객연령대", { type: "array", items: enum_(["20대", "30대", "40대", "50대", "60대이상"]) }],
+  ["foreign_share", "외국인비중", nullable_(enum_(["없음", "일부", "다수"]))],
+  ["nationalities", "추정국적", strArray_],
+  ["note", "특이사항", { type: "string" }],
+  ["excerpt", "원문발췌", { type: "string" }],
+];
+
+const STRUCTURE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["observations", "visit_result_hint", "revisit_time"],
+  properties: {
+    observations: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: OBS_FIELDS.map(f => f[0]),
+        properties: Object.fromEntries(OBS_FIELDS.map(([key, , schema]) => [key, schema])),
+      },
+    },
+    visit_result_hint: nullable_(enum_(VISIT_RESULTS)),
+    revisit_time: nullable_({ type: "string" }),
+  },
+};
+
+const STRUCTURE_RULES = `당신은 주류 영업 상권 조사원의 현장 음성 메모를 조사 기록으로 정리한다.
+입력은 아이폰 음성 인식으로 받아쓴 한국어 원문이라 오인식이 섞여 있다. 어느 업장 앞에서 녹음했는지는 따로 주어진다.
+
+관찰 나누기
+- 근거 유형이 다른 내용은 관찰을 나눈다. 한 관찰에는 한 가지 근거 유형만 담는다.
+- E1 관측: 직접 본 것. 예: 테라 POCM이 붙어 있음, 카스 생맥주 통 8개.
+- E2 추론: 관측을 근거로 한 추측. "~같다", "~로 보인다", "~추정", "~예상" 같은 표현. 사실로 쓰지 않는다.
+- E3 전언: 들은 것. 전언주체를 반드시 채운다. 주체를 알 수 없으면 기타.
+- 조사방식: 밖에서 봤으면 외부관측, 들어가서 봤으면 내부진입, 사장님이나 직원과 대화했으면 업주인터뷰, 옆 가게 등 제3자에게 들었으면 제3자전언.
+
+값 채우기
+- 말하지 않은 것은 채우지 않는다. Y/N/미확인 칸은 미확인, 나머지는 null 또는 빈 배열이다. 추측으로 채우지 않는다.
+- 브랜드는 아래 사전의 표기로 맞춘다. 자사 브랜드 목록에 있으면 자사브랜드, 그 밖의 맥주는 경쟁브랜드, 소주는 소주브랜드, 하이볼과 와인 등은 기타주류에 넣는다.
+- POCM은 업장 안팎의 주류 홍보물이다. 음성 인식이 "PC엠", "PC M", "피씨엠", "피오씨엠" 등으로 적었으면 POCM으로 읽는다.
+- 사전의 STT 교정 중 상태가 자동교정인 것은 교정해서 읽는다. 확인대기인 것은 원문 그대로 둔다.
+- 특이사항은 그 관찰의 핵심을 짧게 쓴다. 가운뎃점, 대시, 하이픈을 문장부호로 쓰지 않는다.
+- 원문발췌는 그 관찰의 근거가 된 원문 구간을 고치지 않고 그대로 옮긴다.
+- 업장 이름은 주어지므로 원문에서 상호명을 따로 뽑지 않는다.
+- 조사와 무관한 말만 있으면 observations는 빈 배열이다.
+
+출력 키와 뜻
+method 조사방식, evidence 근거유형, informant 전언주체, draft_beer 생맥주 취급, bottle_beer 병맥주 취급,
+own_brands 자사 브랜드, competitor_brands 경쟁 맥주 브랜드, soju_brands 소주 브랜드, other_drinks 기타 주류,
+nab_potential 무알코올 맥주(NAB) 적용 가능성, pocm POCM 유무, pocm_types POCM 유형, pocm_brands POCM에 적힌 브랜드,
+pocm_location POCM 위치, pocm_density 경쟁사 POCM이 얼마나 많은지, stock_evidence 케이스나 생맥주 통 적재량 같은 물증,
+patio 야장(외부 좌석 영업) 여부, crowd 혼잡도, waiting 대기 팀 수, age_groups 고객 연령대, foreign_share 외국인 비중,
+nationalities 추정 국적, note 특이사항, excerpt 원문발췌.
+
+방문 결과와 재방문
+- visit_result_hint: 원문에 방문 결과가 드러나면 채운다. 사장님이나 발주 담당자가 없음은 키맨부재, 브레이크 타임은 브레이크타임, 아직 문을 안 열었음은 영업전. 드러나지 않으면 null.
+- revisit_time: 다시 오라는 시각이나 사장님 출근 시각이 나오면 "18:00"처럼 24시간 형식으로 쓴다. 시각이 애매하면 원문 표현을 그대로 쓴다. 없으면 null.`;
+
+function claudeSettings_() {
+  const props = PropertiesService.getScriptProperties();
+  const key = props.getProperty("ANTHROPIC_API_KEY");
+  if (!key) throw new ClaudeError("no_api_key", "스크립트 속성에 ANTHROPIC_API_KEY가 없습니다", false);
+  return {
+    key,
+    model: props.getProperty("CLAUDE_MODEL") || DEFAULT_MODEL,
+    effort: props.getProperty("CLAUDE_EFFORT") || DEFAULT_EFFORT,
+  };
+}
+
+function dictionaryText_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName("사전");
+  if (!sheet) return "(사전 탭 없음)";
+  return readSheet_("사전").map(r =>
+    [r["구분"], r["용어 또는 인식결과"], r["의미 또는 교정"], r["상태"]].filter(v => v !== null && v !== "").join(" | ")
+  ).join("\n");
+}
+
+function placeInfo_(placeId) {
+  const place = readSheet_("places").find(p => String(p.place_id) === String(placeId));
+  if (!place) throw new InputError(`places에 없는 place_id: ${placeId}`);
+  return place;
+}
+
+/** 저장하지 않고 구조화 결과만 돌려준다. 칩으로 확인하고 고친 뒤 saveVisit으로 저장한다 */
+function structure_(placeId, text) {
+  const place = placeInfo_(placeId);
+  return { ok: true, ...callClaude_(place, text) };
+}
+
+function callClaude_(place, text) {
+  if (typeof text !== "string" || !text.trim()) throw new InputError("녹음 원문이 비어 있습니다");
+  if (text.length > MAX_TEXT) throw new InputError(`녹음 원문이 ${MAX_TEXT}자를 넘습니다`);
+  const s = claudeSettings_();
+
+  const kind = place["업태서술"] || place["카카오 업종"] || "미확인";
+  const payload = {
+    model: s.model,
+    max_tokens: 16000,
+    system: `${STRUCTURE_RULES}\n\n사전 (구분 | 용어 또는 인식결과 | 의미 또는 교정 | 상태)\n${dictionaryText_()}`,
+    messages: [{
+      role: "user",
+      content: `업장: ${place["상호명"]} (${place.zone_id || "구역 미상"}, 업태 ${kind})\n\n녹음 원문:\n${text.trim()}`,
+    }],
+    output_config: { effort: s.effort, format: { type: "json_schema", schema: STRUCTURE_SCHEMA } },
+  };
+  const headers = { "x-api-key": s.key, "anthropic-version": "2023-06-01" };
+  // Opus 5와 Fable 계열은 안전 판정 거절 시 서버가 다른 모델로 다시 실행하도록 한다
+  if (/^claude-(opus-5|fable)/.test(s.model)) {
+    payload.fallbacks = "default";
+    headers["anthropic-beta"] = "server-side-fallback-2026-07-01";
+  }
+
+  const started = Date.now();
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "post", contentType: "application/json", headers, payload: JSON.stringify(payload), muteHttpExceptions: true,
+  });
+  const code = res.getResponseCode();
+  let body;
+  try {
+    body = JSON.parse(res.getContentText());
+  } catch (e) {
+    throw new ClaudeError("claude_error", `Claude 응답을 읽을 수 없습니다 (HTTP ${code})`, code >= 500);
+  }
+  if (code !== 200) {
+    const msg = (body.error && body.error.message) || `HTTP ${code}`;
+    const retryable = code === 429 || code >= 500;
+    throw new ClaudeError(retryable ? "claude_busy" : "claude_error", `Claude 호출 실패: ${msg}`, retryable);
+  }
+  if (body.stop_reason === "refusal") throw new ClaudeError("claude_refusal", "Claude가 이 요청을 처리하지 않았습니다", false);
+  if (body.stop_reason === "max_tokens") throw new ClaudeError("claude_error", "구조화 결과가 길이 제한에 걸렸습니다", false);
+
+  const textBlock = (body.content || []).find(b => b.type === "text");
+  if (!textBlock) throw new ClaudeError("claude_error", "구조화 결과가 비어 있습니다", false);
+  let structured;
+  try {
+    structured = JSON.parse(textBlock.text);
+  } catch (e) {
+    throw new ClaudeError("claude_error", "구조화 결과가 JSON 형식이 아닙니다", false);
+  }
+  return { structured, model: body.model, usage: body.usage, elapsedMs: Date.now() - started };
+}
+
+/**
+ * visit = { client_id, place_id, visited_at "yyyy-MM-dd HH:mm", plan_id?, result, revisit_time?, text, structured? }
+ * structured가 없고 text가 있으면 여기서 구조화한다 (통신이 끊겨 구조화를 못 한 채 대기열에 들어간 방문)
+ * 같은 client_id로 다시 오면 새로 쓰지 않고 먼저 저장한 결과를 돌려준다
+ */
+function saveVisit_(visit) {
+  if (!visit || typeof visit !== "object") throw new InputError("visit이 없습니다");
+  if (typeof visit.client_id !== "string" || !visit.client_id) throw new InputError("client_id가 없습니다");
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(visit.visited_at || "")) throw new InputError("visited_at은 yyyy-MM-dd HH:mm 형식이어야 합니다");
+  if (!VISIT_RESULTS.includes(visit.result)) throw new InputError(`방문 결과는 ${VISIT_RESULTS.join(", ")} 중 하나여야 합니다`);
+  const place = placeInfo_(visit.place_id);
+
+  const existing = findVisitByClientId_(visit.client_id);
+  if (existing) return { ok: true, duplicate: true, ...existing };
+
+  let structured = visit.structured;
+  let structuredBy = "앱에서 확인";
+  if (!structured) {
+    structured = visit.text && visit.text.trim() ? callClaude_(place, visit.text).structured : { observations: [] };
+    structuredBy = "대기열 자동 구조화";
+  }
+  const observations = Array.isArray(structured.observations) ? structured.observations : [];
+
+  return withLock_(() => {
+    const again = findVisitByClientId_(visit.client_id);
+    if (again) return { ok: true, duplicate: true, ...again };
+
+    const ss = SpreadsheetApp.getActive();
+    const visitsSheet = ss.getSheetByName("visits");
+    const obsSheet = ss.getSheetByName("observations");
+    if (!visitsSheet) throw new Error("visits 탭이 없습니다. setupSchema를 실행하세요");
+
+    const visitId = "V" + Utilities.formatDate(new Date(), TIMEZONE, "yyyyMMddHHmmss") + String(Date.now() % 1000).padStart(3, "0");
+    const visitRow = {
+      "visit_id": visitId, "place_id": place.place_id, "방문일시": visit.visited_at, "plan_id": visit.plan_id || "",
+      "방문 결과": visit.result, "재방문 희망 시각": visit.revisit_time || "", "검수 상태": "미검수",
+      "녹음 원문": visit.text || "", "구조화 결과": JSON.stringify(structured),
+      "비고": `client:${visit.client_id} / ${structuredBy}`,
+    };
+    writeRow_(visitsSheet, firstEmptyRow_(visitsSheet), visitRow);
+
+    let nextObs = maxIdNumber_(obsSheet, "O") + 1;
+    const obsRows = observations.map(o => {
+      const row = { "obs_id": "O" + String(nextObs++).padStart(3, "0"), "place_id": place.place_id, "조사일시": visit.visited_at,
+                    "소스파일": "현장앱", "visit_id": visitId };
+      OBS_FIELDS.forEach(([key, column]) => {
+        const v = o[key];
+        row[column] = Array.isArray(v) ? v.join(", ") : v === null || v === undefined ? "" : v;
+      });
+      writeRow_(obsSheet, firstEmptyRow_(obsSheet), row);
+      return row;
+    });
+
+    const status = updatePlaceStatus_(place.place_id, visit.result, observations, visit.visited_at.slice(0, 10));
+    return { ok: true, duplicate: false, visit: visitRow, observations: obsRows, place_status: status };
+  });
+}
+
+function findVisitByClientId_(clientId) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName("visits");
+  if (!sheet) return null;
+  const mark = `client:${clientId}`;
+  const row = readSheet_("visits").find(v => String(v["비고"] || "").split(" / ")[0] === mark);
+  return row ? { visit: row, observations: [], place_status: null } : null;
+}
+
+/** 헤더 이름으로 한 행을 쓴다. 상호명 칸은 수식이라 건너뛰고, 그 앞뒤 구간을 한 번씩 쓴다 */
+function writeRow_(sheet, rowIndex, values) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  const skip = headers.indexOf("상호명");
+  const segments = skip < 0 ? [[0, headers.length]] : [[0, skip], [skip + 1, headers.length]];
+  segments.forEach(([from, to]) => {
+    if (to <= from) return;
+    const row = headers.slice(from, to).map(h => (h in values ? values[h] : ""));
+    sheet.getRange(rowIndex, from + 1, 1, to - from).setValues([row]);
+  });
+}
+
+function maxIdNumber_(sheet, prefix) {
+  const ids = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), 1).getValues();
+  return ids.reduce((max, r) => {
+    const m = String(r[0]).match(new RegExp(`^${prefix}(\\d+)$`));
+    return m ? Math.max(max, Number(m[1])) : max;
+  }, 0);
+}
+
+/** 완료면 관측완료(업주인터뷰가 있으면 상담완료, 이미 상담완료면 유지). 완료가 아니면 재방문필요 */
+function updatePlaceStatus_(placeId, result, observations, date) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName("places");
+  const row = findRow_(sheet, String(placeId));
+  if (!row) return null;
+  const statusCol = headerIndex_(sheet, "진행상태");
+  const firstCol = headerIndex_(sheet, "최초조사일");
+  const current = String(sheet.getRange(row, statusCol).getValue());
+  let next;
+  if (result === "완료") {
+    const interviewed = observations.some(o => o.method === "업주인터뷰");
+    next = interviewed || current === "상담완료" ? "상담완료" : "관측완료";
+  } else {
+    next = "재방문필요";
+  }
+  if (current !== "제외") sheet.getRange(row, statusCol).setValue(next);
+  if (firstCol && !sheet.getRange(row, firstCol).getValue()) sheet.getRange(row, firstCol).setValue(date);
+  return current === "제외" ? "제외" : next;
 }
