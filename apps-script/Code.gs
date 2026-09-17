@@ -16,6 +16,9 @@
  *   savePlan       routing_plans 저장. { plan: { plan_id?, date, zones[], order[], actualOrder[], memo } }
  *   structure      녹음 원문을 Claude로 구조화. 저장하지 않는다. { place_id, text }
  *   saveVisit      방문 저장. visits 1행, observations 여러 행, places 진행상태 갱신. { visit: {...} }
+ *   mapData        현장 지도용 읽기. zones, places만. { }
+ *   setStatus      places 진행상태 변경. { place_id, status, reason?, time? }
+ *   addPlace       임의 핀으로 places에 새 행. { name, lat, lng }
  *
  * 스크립트 속성
  *   ACCESS_TOKEN       접근 토큰 (setupToken으로 생성)
@@ -24,7 +27,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.4";
+const API_VERSION = "0.5";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -74,6 +77,13 @@ function doPost(e) {
         return json_(structure_(req.place_id, req.text));
       case "saveVisit":
         return json_(saveVisit_(req.visit));
+      case "mapData":
+        return json_({ ok: true, version: API_VERSION, fetchedAt: formatDate_(new Date(), true),
+                       data: { zones: readSheet_("zones"), places: readSheet_("places") } });
+      case "setStatus":
+        return json_(withLock_(() => setStatus_(req)));
+      case "addPlace":
+        return json_(withLock_(() => addPlace_(req)));
       default:
         return json_({ ok: false, error: "unknown_action" });
     }
@@ -331,17 +341,11 @@ function setupSchema() {
   setListValidation_(places, statusCol, PLACE_STATUS);
   done.push(`places 진행상태 선택지: ${PLACE_STATUS.join(", ")}`);
 
+  ensurePlaceColumns_().forEach(c => done.push(`places ${c.name}: ${c.added ? `${c.col}번째 컬럼에 추가` : "이미 있음"}`));
+
   const obs = ss.getSheetByName("observations");
-  if (headerIndex_(obs, "visit_id")) {
-    done.push("observations visit_id: 이미 있음");
-  } else {
-    const col = obs.getLastColumn() + 1;
-    if (obs.getMaxColumns() < col) obs.insertColumnAfter(obs.getMaxColumns());
-    const ref = obs.getRange(1, 1);
-    obs.getRange(1, col).setValue("visit_id")
-      .setFontWeight("bold").setFontColor(ref.getFontColor()).setBackground(ref.getBackground());
-    done.push(`observations visit_id: ${col}번째 컬럼에 추가`);
-  }
+  const visitCol = addHeaderColumn_(obs, "visit_id");
+  done.push(`observations visit_id: ${visitCol.added ? `${visitCol.col}번째 컬럼에 추가` : "이미 있음"}`);
 
   done.forEach(line => Logger.log(line));
 }
@@ -598,10 +602,13 @@ function findVisitByClientId_(clientId) {
   return row ? { visit: row, observations: [], place_status: null } : null;
 }
 
-/** 헤더 이름으로 한 행을 쓴다. 상호명 칸은 수식이라 건너뛰고, 그 앞뒤 구간을 한 번씩 쓴다 */
-function writeRow_(sheet, rowIndex, values) {
+/**
+ * 헤더 이름으로 한 행을 쓴다. skipName 칸은 건너뛰고 그 앞뒤 구간을 한 번씩 쓴다
+ * observations와 visits의 상호명 칸은 수식이라 기본으로 건너뛴다. places처럼 상호명이 값인 탭은 skipName을 null로 준다
+ */
+function writeRow_(sheet, rowIndex, values, skipName = "상호명") {
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
-  const skip = headers.indexOf("상호명");
+  const skip = skipName ? headers.indexOf(skipName) : -1;
   const segments = skip < 0 ? [[0, headers.length]] : [[0, skip], [skip + 1, headers.length]];
   segments.forEach(([from, to]) => {
     if (to <= from) return;
@@ -636,4 +643,99 @@ function updatePlaceStatus_(placeId, result, observations, date) {
   if (current !== "제외") sheet.getRange(row, statusCol).setValue(next);
   if (firstCol && !sheet.getRange(row, firstCol).getValue()) sheet.getRange(row, firstCol).setValue(date);
   return current === "제외" ? "제외" : next;
+}
+
+/* ------------------------------------------------------------------
+ * 현장 지도 MVP: 진행상태 변경과 임의 핀
+ * ------------------------------------------------------------------ */
+
+// 앱이 쓰는 진행상태 값. 상담완료는 앱이 쓰지 않고, 이미 상담완료면 완료로 바꿔도 덮어쓰지 않는다
+const MAP_STATUS = ["미방문", "관측완료", "재방문필요", "제외"];
+const REVISIT_REASONS = ["키맨 부재", "브레이크 타임", "영업 전", "기타"];
+const PLACE_EXTRA_COLUMNS = ["재방문사유", "재방문예정시각"];
+
+/** 헤더에 컬럼이 없으면 맨 뒤에 추가한다. { col, added } */
+function addHeaderColumn_(sheet, name) {
+  const existing = headerIndex_(sheet, name);
+  if (existing) return { col: existing, added: false };
+  const col = sheet.getLastColumn() + 1;
+  if (sheet.getMaxColumns() < col) sheet.insertColumnAfter(sheet.getMaxColumns());
+  const ref = sheet.getRange(1, 1);
+  sheet.getRange(1, col).setValue(name)
+    .setFontWeight("bold").setFontColor(ref.getFontColor()).setBackground(ref.getBackground());
+  return { col, added: true };
+}
+
+/** places에 재방문사유, 재방문예정시각 컬럼이 없으면 추가한다. 재방문사유에는 드롭다운을 건다 */
+function ensurePlaceColumns_() {
+  const places = SpreadsheetApp.getActive().getSheetByName("places");
+  return PLACE_EXTRA_COLUMNS.map(name => {
+    const r = addHeaderColumn_(places, name);
+    if (r.added && name === "재방문사유") setListValidation_(places, r.col, REVISIT_REASONS);
+    return { name, ...r };
+  });
+}
+
+function setStatus_(req) {
+  const placeId = String(req.place_id || "");
+  if (!MAP_STATUS.includes(req.status)) throw new InputError(`진행상태는 ${MAP_STATUS.join(", ")} 중 하나여야 합니다`);
+  const revisit = req.status === "재방문필요";
+  if (revisit && !REVISIT_REASONS.includes(req.reason)) throw new InputError(`재방문 사유는 ${REVISIT_REASONS.join(", ")} 중 하나여야 합니다`);
+  const time = revisit && req.time ? String(req.time).trim().slice(0, 50) : "";
+
+  ensurePlaceColumns_();
+  const sheet = SpreadsheetApp.getActive().getSheetByName("places");
+  const row = placeId ? findRow_(sheet, placeId) : 0;
+  if (!row) throw new InputError(`places에 없는 place_id: ${placeId}`);
+  const statusCol = headerIndex_(sheet, "진행상태");
+  const reasonCol = headerIndex_(sheet, "재방문사유");
+  const timeCol = headerIndex_(sheet, "재방문예정시각");
+
+  const current = String(sheet.getRange(row, statusCol).getValue());
+  const keepConsult = req.status === "관측완료" && current === "상담완료";
+  const next = keepConsult ? "상담완료" : req.status;
+  if (!keepConsult) sheet.getRange(row, statusCol).setValue(next);
+  // 재방문이 아니면 사유와 예정시각을 비운다. 이전 재방문 사유가 남아 헷갈리지 않게 한다
+  sheet.getRange(row, reasonCol).setValue(revisit ? req.reason : "");
+  sheet.getRange(row, timeCol).setValue(time);
+  return { ok: true, place_id: placeId, "진행상태": next, "재방문사유": revisit ? req.reason : "", "재방문예정시각": time };
+}
+
+function addPlace_(req) {
+  const name = String(req.name || "").trim();
+  if (!name) throw new InputError("상호명을 입력하세요");
+  if (name.length > 100) throw new InputError("상호명이 너무 깁니다");
+  const lat = Number(req.lat), lng = Number(req.lng);
+  // 대한민국 범위 밖 좌표는 잘못 찍힌 값으로 본다
+  if (!(lat > 33 && lat < 39 && lng > 124 && lng < 132)) throw new InputError("좌표가 올바르지 않습니다");
+
+  const sheet = SpreadsheetApp.getActive().getSheetByName("places");
+  const placeId = "P" + String(maxIdNumber_(sheet, "P") + 1).padStart(3, "0");
+  const values = {
+    "place_id": placeId, "zone_id": zoneOfPoint_(lng, lat), "상호명": name, "상호명_상태": "확인대기",
+    "대상유형": "POC", "출처": "현장추가", "POC seg_상태": "확인대기", "lat": lat, "lng": lng, "좌표출처": "수동",
+    "진행상태": "미방문", "최초조사일": Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd"), "비고": "현장 지도 임의 핀",
+  };
+  writeRow_(sheet, firstEmptyRow_(sheet), values, null);
+  return { ok: true, place: values };
+}
+
+/** zones 경계(MultiPolygon)에 들어가는 구역. 없으면 빈 문자열 */
+function zoneOfPoint_(lng, lat) {
+  for (const z of readSheet_("zones")) {
+    let geom;
+    try { geom = JSON.parse(z["경계"]); } catch (e) { continue; }
+    if (!geom || geom.type !== "MultiPolygon") continue;
+    if (geom.coordinates.some(poly => pointInRing_(lng, lat, poly[0]))) return String(z.zone_id);
+  }
+  return "";
+}
+
+function pointInRing_(x, y, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
