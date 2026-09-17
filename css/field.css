@@ -106,3 +106,26 @@ h3 { margin: 0; font-size: 18px; }
   position: fixed; left: 50%; bottom: calc(70px + env(safe-area-inset-bottom)); transform: translateX(-50%);
   background: #222; color: #fff; padding: 10px 16px; border-radius: 20px; font-size: 14px; z-index: 60; max-width: 90%; text-align: center;
 }
+
+/* 업장 검색 */
+.searchbar { position: relative; padding: 6px 8px; border-bottom: 1px solid #e5e5e5; background: #fff; z-index: 20; }
+.searchbar input {
+  width: 100%; padding: 10px 38px 10px 12px; border: 1px solid #ccc; border-radius: 10px; font-size: 16px; background: #f7f8fa;
+  -webkit-appearance: none; appearance: none;
+}
+.searchbar input::-webkit-search-cancel-button { display: none; }
+.searchbar .clear { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); border: 0; background: none; color: #888; font-size: 16px; padding: 6px; }
+.search-results {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 15; max-height: 62%; overflow-y: auto;
+  background: #fff; border-bottom: 1px solid #ddd; box-shadow: 0 8px 20px rgba(0,0,0,.15);
+}
+.search-results ul { margin: 0; padding: 0; list-style: none; }
+.r-head { margin: 0; padding: 8px 12px 4px; font-size: 12px; font-weight: 700; color: #1f3a5f; background: #f3f5f8; }
+.r-item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; width: 100%; padding: 11px 12px; border: 0; border-bottom: 1px solid #f0f0f0; background: #fff; text-align: left; }
+.r-item i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.r-name { font-weight: 600; flex: 1; min-width: 50%; }
+.r-item small { color: #888; font-size: 12px; }
+.r-addr { flex-basis: 100%; }
+.plus { padding: 2px 8px; border-radius: 10px; background: #fee500; color: #191919; font-size: 12px; font-weight: 700; }
+.r-empty { padding: 11px 12px; color: #888; font-size: 14px; }
+.r-more { width: 100%; padding: 12px; border: 0; background: #fff; color: #1f3a5f; font-weight: 600; text-align: left; }

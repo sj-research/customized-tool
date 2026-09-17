@@ -53,9 +53,12 @@ const Backend = {
     if (fixtureMode) return devReply({ ok: true, place_id: placeId, "진행상태": status, "재방문사유": reason || "", "재방문예정시각": time || "" });
     return Api.call("setStatus", { place_id: placeId, status, reason, time });
   },
-  async addPlace(name, lat, lng) {
-    if (fixtureMode) return devReply({ ok: true, place: { place_id: "P9" + String(Date.now()).slice(-2), zone_id: "", "상호명": name, lat, lng, "진행상태": "미방문", "출처": "현장추가" } });
-    return Api.call("addPlace", { name, lat, lng });
+  async addPlace(name, lat, lng, kakao) {
+    if (fixtureMode) {
+      return devReply({ ok: true, duplicate: false, place: { place_id: "P9" + String(Date.now()).slice(-2), zone_id: zoneOfPoint(lng, lat), "상호명": name, lat, lng,
+        "진행상태": "미방문", "출처": "현장추가", ...(kakao ? { kakao_id: kakao.id, "카카오 업종": kakao.category, "주소": kakao.address, "지도링크": kakao.url } : {}) } });
+    }
+    return Api.call("addPlace", { name, lat, lng, kakao });
   },
 };
 
@@ -143,7 +146,7 @@ function initMap() {
   state.map = new kakao.maps.Map($("map"), { center: new kakao.maps.LatLng(37.5685, 127.0085), level: 4 });
   kakao.maps.event.addListener(state.map, "zoom_changed", updateMarkerVisibility);
   kakao.maps.event.addListener(state.map, "dragstart", () => setFollow(false));
-  kakao.maps.event.addListener(state.map, "click", () => closeSheet());
+  kakao.maps.event.addListener(state.map, "click", () => { closeSheet(); closeSearch(); });
   // PC에서는 오른쪽 클릭으로도 핀을 추가한다
   kakao.maps.event.addListener(state.map, "rightclick", e => openPinSheet(e.latLng.getLat(), e.latLng.getLng()));
   initLongPress();
@@ -379,7 +382,7 @@ function openPinSheet(lat, lng) {
   setTimeout(() => $("pinName").focus(), 50);
 }
 
-async function addPin(name, lat, lng) {
+async function addPin(name, lat, lng, kakao) {
   const tempId = `TMP${Date.now()}`;
   const temp = decorate({ place_id: tempId, "상호명": name, lat, lng, "진행상태": "미방문" });
   state.places.push(temp);
@@ -388,15 +391,22 @@ async function addPin(name, lat, lng) {
   addMarker(temp);
   renderCounts();
   try {
-    const resp = await Backend.addPlace(name, lat, lng);
-    const place = decorate(resp.place);
+    const resp = await Backend.addPlace(name, lat, lng, kakao);
     removePlace(tempId);
+    if (resp.duplicate && state.byId[resp.place.place_id]) {
+      toast(`${name}은(는) 이미 명단에 있습니다`);
+      if (kakao) focusPlace(resp.place.place_id);
+      renderCounts();
+      return;
+    }
+    const place = decorate({ ...resp.place, lat: Number(resp.place.lat), lng: Number(resp.place.lng) });
     state.places.push(place);
     state.byId[place.place_id] = place;
     state.confirmed[place.place_id] = pick(place);
     addMarker(place);
     saveMapCache(state.fetchedAt);
     toast(`${name} 추가 완료${place.zone_id ? ` (${place.zone_id})` : " (구역 밖)"}`);
+    if (kakao) focusPlace(place.place_id);
   } catch (err) {
     removePlace(tempId);
     toast(`${name}을(를) 추가하지 못했습니다. ${err.message}`);
@@ -522,6 +532,177 @@ function distanceM(lat1, lng1, lat2, lng2) {
 window.__simulatePosition = (lat, lng, accuracy = 10, t = Date.now()) =>
   onPosition({ coords: { latitude: lat, longitude: lng, accuracy, heading: null, speed: null }, timestamp: t });
 
+/* ---------------- 업장 검색: 명단 먼저, 없으면 카카오에서 구역 안만 ---------------- */
+
+const SEARCH_LOCAL_MAX = 20;
+const KAKAO_MAX_PAGES = 3;          // 카카오 키워드 검색은 한 페이지 15건. 최대 45건까지 본다
+const search = { timer: null, query: "", kakao: null, kakaoQuery: "", kakaoLoading: false, kakaoError: "" };
+
+// 검색에 카카오 장소 검색(services) 라이브러리가 필요하다. 준비 모드와 같이 쓰는 common.js는 건드리지 않고 여기서 불러온다
+function loadKakaoWithServices(appKey) {
+  return new Promise((resolve, reject) => {
+    if (window.kakao && kakao.maps && kakao.maps.services) return resolve();
+    if (!appKey) return reject(new Error("설정에서 카카오 JS 키를 입력하세요"));
+    const s = document.createElement("script");
+    s.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(appKey)}&autoload=false&libraries=services`;
+    s.onload = () => window.kakao ? kakao.maps.load(resolve) : reject(new Error("카카오 지도를 불러오지 못했습니다"));
+    s.onerror = () => reject(new Error("카카오 지도를 불러오지 못했습니다. JS 키와 도메인 등록을 확인하세요"));
+    document.head.appendChild(s);
+  });
+}
+
+const squash = v => String(v || "").replace(/\s+/g, "").toLowerCase();
+
+function zoneOfPoint(lng, lat) {
+  for (const z of state.zones) {
+    if (z.geometry && z.geometry.coordinates.some(poly => pointInRing(lng, lat, poly[0]))) return String(z.zone_id);
+  }
+  return "";
+}
+
+function pointInRing(x, y, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function zonesBounds() {
+  const b = new kakao.maps.LatLngBounds();
+  state.zones.forEach(z => z.geometry && z.geometry.coordinates.forEach(poly =>
+    poly[0].forEach(([lng, lat]) => b.extend(new kakao.maps.LatLng(lat, lng)))));
+  return b;
+}
+
+function initSearch() {
+  $("q").addEventListener("input", () => {
+    clearTimeout(search.timer);
+    search.timer = setTimeout(runSearch, 250);
+  });
+  $("q").addEventListener("keydown", e => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    clearTimeout(search.timer);
+    runSearch(true);
+    $("q").blur();
+  });
+  $("q").addEventListener("focus", () => { if ($("q").value.trim()) renderSearch(); });
+  $("clearQ").onclick = () => { $("q").value = ""; search.query = ""; $("clearQ").hidden = true; closeSearch(); };
+}
+
+function localMatches(query) {
+  const key = squash(query);
+  if (!key) return [];
+  return state.places
+    .filter(p => !String(p.place_id).startsWith("TMP") && squash(p["상호명"]).includes(key))
+    .sort((a, b) => Number(!squash(a["상호명"]).startsWith(key)) - Number(!squash(b["상호명"]).startsWith(key))
+      || String(a["상호명"]).localeCompare(String(b["상호명"])))
+    .slice(0, SEARCH_LOCAL_MAX);
+}
+
+function runSearch(forceKakao) {
+  const query = $("q").value.trim();
+  search.query = query;
+  $("clearQ").hidden = !query;
+  if (!query) return closeSearch();
+  if (search.kakaoQuery !== query) { search.kakao = null; search.kakaoError = ""; }
+  const local = localMatches(query);
+  // 명단에 없으면 카카오에서 자동으로 찾는다. 두 글자 이상일 때만
+  if ((local.length === 0 && squash(query).length >= 2) || forceKakao === true) return searchKakao(query);
+  renderSearch();
+}
+
+function searchKakao(query) {
+  if (search.kakaoQuery === query && (search.kakaoLoading || search.kakao)) return renderSearch();
+  search.kakaoQuery = query;
+  search.kakaoLoading = true;
+  search.kakaoError = "";
+  search.kakao = null;
+  const listed = new Set(state.places.map(p => String(p.kakao_id || "")).filter(Boolean));
+  const found = [];
+  let page = 0;
+  const onResult = (data, status, pagination) => {
+    if (search.kakaoQuery !== query) return; // 그 사이 검색어가 바뀜
+    if (status === kakao.maps.services.Status.ERROR) {
+      search.kakaoLoading = false;
+      search.kakaoError = "카카오 검색에 실패했습니다. 통신 상태를 확인하세요";
+      return renderSearch();
+    }
+    (data || []).forEach(d => {
+      const lat = Number(d.y), lng = Number(d.x);
+      const zone = zoneOfPoint(lng, lat);
+      if (!zone || listed.has(String(d.id))) return; // 구역 밖이거나 이미 명단에 있는 업장은 뺀다
+      found.push({ id: String(d.id), name: d.place_name, lat, lng, zone, category: d.category_name,
+                   address: d.road_address_name || d.address_name, url: d.place_url });
+    });
+    page++;
+    if (pagination && pagination.hasNextPage && page < KAKAO_MAX_PAGES) return pagination.nextPage();
+    search.kakao = found;
+    search.kakaoLoading = false;
+    renderSearch();
+  };
+  new kakao.maps.services.Places().keywordSearch(query, onResult, { bounds: zonesBounds(), size: 15 });
+  renderSearch();
+}
+
+function renderSearch() {
+  const query = search.query;
+  if (!query) return closeSearch();
+  const local = localMatches(query);
+  const box = $("searchResults");
+  const localHtml = local.length
+    ? local.map(p => `<li><button class="r-item" data-local="${esc(p.place_id)}">
+        <i style="background:${STATUS_COLOR[appStatus(p)]}"></i>
+        <span class="r-name">${esc(p.displayName)}</span><small>${esc(p.zone_id || "구역 밖")} / ${esc(appStatus(p))}</small></button></li>`).join("")
+    : `<li class="r-empty">명단에 없습니다</li>`;
+
+  let kakaoHtml;
+  if (search.kakaoLoading && search.kakaoQuery === query) {
+    kakaoHtml = `<li class="r-empty">카카오에서 찾는 중</li>`;
+  } else if (search.kakaoError && search.kakaoQuery === query) {
+    kakaoHtml = `<li class="r-empty warn">${esc(search.kakaoError)}</li>`;
+  } else if (search.kakao && search.kakaoQuery === query) {
+    kakaoHtml = search.kakao.length
+      ? search.kakao.map((k, i) => `<li><button class="r-item" data-kakao="${i}">
+          <span class="plus">추가</span><span class="r-name">${esc(k.name)}</span>
+          <small>${esc(k.zone)} / ${esc(String(k.category || "").split(">").slice(1).map(x => x.trim()).join(" > "))}</small>
+          <small class="r-addr">${esc(k.address || "")}</small></button></li>`).join("")
+      : `<li class="r-empty">구역 안에서 명단에 없는 카카오 업장이 없습니다</li>`;
+  } else {
+    kakaoHtml = `<li><button class="r-more" id="kakaoMore">명단에 없나요? 카카오에서 찾기</button></li>`;
+  }
+
+  box.innerHTML = `<p class="r-head">명단</p><ul>${localHtml}</ul>
+    <p class="r-head">카카오 (구역 안, 명단에 없는 업장)</p><ul>${kakaoHtml}</ul>`;
+  box.hidden = false;
+  box.querySelectorAll("[data-local]").forEach(b => b.onclick = () => { closeSearch(); focusPlace(b.dataset.local); });
+  box.querySelectorAll("[data-kakao]").forEach(b => b.onclick = () => {
+    const k = search.kakao[+b.dataset.kakao];
+    if (!confirm(`${k.name}\n${k.address || ""}\n\n명단에 추가할까요?`)) return;
+    closeSearch();
+    search.kakao = null;
+    search.kakaoQuery = "";
+    addPin(k.name, k.lat, k.lng, { id: k.id, category: k.category, address: k.address, url: k.url });
+  });
+  if ($("kakaoMore")) $("kakaoMore").onclick = () => searchKakao(query);
+}
+
+function closeSearch() {
+  $("searchResults").hidden = true;
+}
+
+function focusPlace(placeId) {
+  const p = state.byId[placeId];
+  if (!p) return;
+  setFollow(false);
+  if (state.map.getLevel() > 2) state.map.setLevel(2);
+  state.map.setCenter(new kakao.maps.LatLng(p.lat, p.lng));
+  updateMarkerVisibility();
+  openSheet(placeId);
+}
+
 /* ---------------- 설정, 알림, 시작 ---------------- */
 
 function openSettings(message) {
@@ -550,6 +731,7 @@ async function start() {
     location.reload();
   };
   $("locBtn").onclick = onLocButton;
+  initSearch();
   // 앱을 백그라운드로 보내면 위치 추적을 멈춘다. 돌아오면 다시 켠다
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) stopTracking();
@@ -559,7 +741,7 @@ async function start() {
   const s = Store.settings();
   if (!fixtureMode && (!s.url || !s.token || !s.kakao)) return openSettings("처음 한 번 설정이 필요합니다.");
   try {
-    await loadKakao(s.kakao);
+    await loadKakaoWithServices(s.kakao);
   } catch (err) {
     return openSettings(err.message);
   }

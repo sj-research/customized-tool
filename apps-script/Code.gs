@@ -18,7 +18,7 @@
  *   saveVisit      방문 저장. visits 1행, observations 여러 행, places 진행상태 갱신. { visit: {...} }
  *   mapData        현장 지도용 읽기. zones, places만. { }
  *   setStatus      places 진행상태 변경. { place_id, status, reason?, time? }
- *   addPlace       임의 핀으로 places에 새 행. { name, lat, lng }
+ *   addPlace       places에 새 행. 임의 핀 { name, lat, lng }, 검색 결과 { name, lat, lng, kakao: { id, category, address, url } }
  *
  * 스크립트 속성
  *   ACCESS_TOKEN       접근 토큰 (setupToken으로 생성)
@@ -27,7 +27,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.5";
+const API_VERSION = "0.6";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -709,15 +709,31 @@ function addPlace_(req) {
   // 대한민국 범위 밖 좌표는 잘못 찍힌 값으로 본다
   if (!(lat > 33 && lat < 39 && lng > 124 && lng < 132)) throw new InputError("좌표가 올바르지 않습니다");
 
+  // 검색에서 고른 카카오 업장이면 kakao = { id, category, address, url }. 없으면 지도에서 찍은 임의 핀
+  const kakao = req.kakao && typeof req.kakao === "object" ? req.kakao : null;
+  if (kakao && !/^\d+$/.test(String(kakao.id || ""))) throw new InputError("카카오 업장 id가 올바르지 않습니다");
+
   const sheet = SpreadsheetApp.getActive().getSheetByName("places");
+  if (kakao) {
+    // 같은 카카오 업장이 이미 명단에 있으면 새로 넣지 않고 기존 행을 돌려준다
+    const existing = readSheet_("places").find(p => String(p.kakao_id || "") === String(kakao.id));
+    if (existing) return { ok: true, duplicate: true, place: existing };
+  }
   const placeId = "P" + String(maxIdNumber_(sheet, "P") + 1).padStart(3, "0");
   const values = {
-    "place_id": placeId, "zone_id": zoneOfPoint_(lng, lat), "상호명": name, "상호명_상태": "확인대기",
-    "대상유형": "POC", "출처": "현장추가", "POC seg_상태": "확인대기", "lat": lat, "lng": lng, "좌표출처": "수동",
-    "진행상태": "미방문", "최초조사일": Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd"), "비고": "현장 지도 임의 핀",
+    "place_id": placeId, "zone_id": zoneOfPoint_(lng, lat), "상호명": name, "상호명_상태": kakao ? "확정" : "확인대기",
+    "대상유형": "POC", "출처": "현장추가", "POC seg_상태": "확인대기", "lat": lat, "lng": lng, "좌표출처": kakao ? "카카오" : "수동",
+    "진행상태": "미방문", "최초조사일": Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd"),
+    "비고": kakao ? "현장 지도 검색으로 추가" : "현장 지도 임의 핀",
   };
+  if (kakao) {
+    values["kakao_id"] = String(kakao.id);
+    values["카카오 업종"] = String(kakao.category || "");
+    values["주소"] = String(kakao.address || "");
+    values["지도링크"] = String(kakao.url || "");
+  }
   writeRow_(sheet, firstEmptyRow_(sheet), values, null);
-  return { ok: true, place: values };
+  return { ok: true, duplicate: false, place: values };
 }
 
 /** zones 경계(MultiPolygon)에 들어가는 구역. 없으면 빈 문자열 */
