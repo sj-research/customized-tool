@@ -17,7 +17,7 @@
  *   structure      녹음 원문을 Claude로 구조화. 저장하지 않는다. { place_id, text }
  *   saveVisit      방문 저장. visits 1행, observations 여러 행, places 진행상태 갱신. { visit: {...} }
  *   mapData        현장 지도용 읽기. zones, places만. { }
- *   setStatus      places 진행상태 변경. { place_id, status, reason?, time? }
+ *   setStatus      places 진행상태 변경. { place_id, status, reason?, time?, manage? }
  *   addPlace       places에 새 행. 임의 핀 { name, lat, lng }, 검색 결과 { name, lat, lng, kakao: { id, category, address, url } }
  *
  * 스크립트 속성
@@ -27,7 +27,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.6";
+const API_VERSION = "0.7";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -652,7 +652,7 @@ function updatePlaceStatus_(placeId, result, observations, date) {
 // 앱이 쓰는 진행상태 값. 상담완료는 앱이 쓰지 않고, 이미 상담완료면 완료로 바꿔도 덮어쓰지 않는다
 const MAP_STATUS = ["미방문", "관측완료", "재방문필요", "제외"];
 const REVISIT_REASONS = ["키맨 부재", "브레이크 타임", "영업 전", "기타"];
-const PLACE_EXTRA_COLUMNS = ["재방문사유", "재방문예정시각"];
+const PLACE_EXTRA_COLUMNS = ["재방문사유", "재방문예정시각", "관리"];
 
 /** 헤더에 컬럼이 없으면 맨 뒤에 추가한다. { col, added } */
 function addHeaderColumn_(sheet, name) {
@@ -666,12 +666,16 @@ function addHeaderColumn_(sheet, name) {
   return { col, added: true };
 }
 
-/** places에 재방문사유, 재방문예정시각 컬럼이 없으면 추가한다. 재방문사유에는 드롭다운을 건다 */
+/** places에 재방문사유, 재방문예정시각, 관리 컬럼이 없으면 추가한다. 재방문사유에는 드롭다운, 관리에는 체크박스를 건다 */
 function ensurePlaceColumns_() {
   const places = SpreadsheetApp.getActive().getSheetByName("places");
   return PLACE_EXTRA_COLUMNS.map(name => {
     const r = addHeaderColumn_(places, name);
     if (r.added && name === "재방문사유") setListValidation_(places, r.col, REVISIT_REASONS);
+    if (r.added && name === "관리") {
+      const rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+      places.getRange(2, r.col, places.getMaxRows() - 1, 1).setDataValidation(rule);
+    }
     return { name, ...r };
   });
 }
@@ -690,6 +694,7 @@ function setStatus_(req) {
   const statusCol = headerIndex_(sheet, "진행상태");
   const reasonCol = headerIndex_(sheet, "재방문사유");
   const timeCol = headerIndex_(sheet, "재방문예정시각");
+  const manageCol = headerIndex_(sheet, "관리");
 
   const current = String(sheet.getRange(row, statusCol).getValue());
   const keepConsult = req.status === "관측완료" && current === "상담완료";
@@ -698,7 +703,12 @@ function setStatus_(req) {
   // 재방문이 아니면 사유와 예정시각을 비운다. 이전 재방문 사유가 남아 헷갈리지 않게 한다
   sheet.getRange(row, reasonCol).setValue(revisit ? req.reason : "");
   sheet.getRange(row, timeCol).setValue(time);
-  return { ok: true, place_id: placeId, "진행상태": next, "재방문사유": revisit ? req.reason : "", "재방문예정시각": time };
+  // 관리 체크는 완료일 때만 둔다. 완료가 아니게 되면 해제한다. 완료인데 값이 안 오면 기존 값을 유지한다
+  const manageCell = sheet.getRange(row, manageCol);
+  if (req.status !== "관측완료") manageCell.setValue(false);
+  else if (typeof req.manage === "boolean") manageCell.setValue(req.manage);
+  const manage = manageCell.getValue() === true;
+  return { ok: true, place_id: placeId, "진행상태": next, "재방문사유": revisit ? req.reason : "", "재방문예정시각": time, "관리": manage };
 }
 
 function addPlace_(req) {

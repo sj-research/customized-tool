@@ -31,7 +31,7 @@ const state = {
   markersVisible: false,
   selected: null,
   pending: {},           // place_id → 서버 응답 대기 중인 요청 번호
-  confirmed: {},         // place_id → 서버에 반영된 마지막 값 { 진행상태, 재방문사유, 재방문예정시각 }
+  confirmed: {},         // place_id → 서버에 반영된 마지막 값 { 진행상태, 재방문사유, 재방문예정시각, 관리 }
   seq: 0,
   watchId: null, wantTracking: false, follow: false,
   me: null, meOverlay: null, heading: null,
@@ -49,9 +49,9 @@ const Backend = {
     const body = await Api.call("mapData");
     return { fetchedAt: body.fetchedAt, data: body.data };
   },
-  async setStatus(placeId, status, reason, time) {
-    if (fixtureMode) return devReply({ ok: true, place_id: placeId, "진행상태": status, "재방문사유": reason || "", "재방문예정시각": time || "" });
-    return Api.call("setStatus", { place_id: placeId, status, reason, time });
+  async setStatus(placeId, status, reason, time, manage) {
+    if (fixtureMode) return devReply({ ok: true, place_id: placeId, "진행상태": status, "재방문사유": reason || "", "재방문예정시각": time || "", "관리": status === "관측완료" && manage === true });
+    return Api.call("setStatus", { place_id: placeId, status, reason, time, manage });
   },
   async addPlace(name, lat, lng, kakao) {
     if (fixtureMode) {
@@ -106,7 +106,8 @@ function decorate(p, nameCount) {
   };
 }
 
-const pick = p => ({ "진행상태": p["진행상태"], "재방문사유": p["재방문사유"] || "", "재방문예정시각": p["재방문예정시각"] || "" });
+const pick = p => ({ "진행상태": p["진행상태"], "재방문사유": p["재방문사유"] || "", "재방문예정시각": p["재방문예정시각"] || "", "관리": isChecked(p["관리"]) });
+const isChecked = v => v === true || String(v).toUpperCase() === "TRUE";
 const appStatus = p => SHEET_TO_APP[p["진행상태"]];
 const isNum = v => v !== null && v !== "" && !isNaN(Number(v));
 
@@ -220,21 +221,22 @@ function closeSheet() {
   $("sheet").hidden = true;
 }
 
-function renderSheet(askReason) {
+function renderSheet(mode) {
   const p = state.byId[state.selected];
   if (!p) return closeSheet();
   const current = appStatus(p);
   const kind = p["업태서술"] || String(p["카카오 업종"] || "").split(">").slice(1).map(s => s.trim()).filter(Boolean).join(" > ");
   const revisitLine = current === "재방문"
     ? `<p class="revisit">재방문 사유: ${esc(p["재방문사유"] || "기록 없음")}${p["재방문예정시각"] ? ` / 예정 ${esc(p["재방문예정시각"])}` : ""}</p>` : "";
+  const manageLine = current === "완료" && isChecked(p["관리"]) ? `<p class="manage">관리 업장</p>` : "";
 
   $("sheet").innerHTML = `
     <div class="s-head">
       <div><h3>${esc(p.displayName)}</h3>${kind ? `<p class="muted">${esc(kind)}</p>` : ""}</div>
       <button class="x" id="closeSheet" aria-label="닫기">✕</button>
     </div>
-    ${revisitLine}
-    ${askReason ? reasonPicker() : `
+    ${revisitLine}${manageLine}
+    ${mode === "reason" ? reasonPicker() : mode === "complete" ? completePicker(isChecked(p["관리"])) : `
       <div class="st-btns">${STATUS_ORDER.map(s =>
         `<button class="st ${s === current ? "on" : ""}" data-st="${s}" style="--c:${STATUS_COLOR[s]}">${s}</button>`).join("")}</div>
       <p class="muted small" id="saving">${state.pending[p.place_id] ? "저장 중" : ""}</p>`}
@@ -242,23 +244,38 @@ function renderSheet(askReason) {
   $("sheet").hidden = false;
   $("closeSheet").onclick = closeSheet;
 
-  if (askReason) {
+  if (mode === "complete") {
+    $("cancelComplete").onclick = () => renderSheet();
+    $("okComplete").onclick = () => changeStatus(p.place_id, "완료", null, null, $("manageCheck").checked);
+    return;
+  }
+  if (mode === "reason") {
     let reason = null;
     $("sheet").querySelectorAll("[data-reason]").forEach(b => b.onclick = () => {
       reason = b.dataset.reason;
       $("sheet").querySelectorAll("[data-reason]").forEach(x => x.classList.toggle("on", x === b));
       $("okReason").disabled = false;
     });
-    $("cancelReason").onclick = () => renderSheet(false);
+    $("cancelReason").onclick = () => renderSheet();
     $("okReason").onclick = () => changeStatus(p.place_id, "재방문", reason, $("revisitTime").value.trim());
     return;
   }
   $("sheet").querySelectorAll("[data-st]").forEach(b => b.onclick = () => {
     const next = b.dataset.st;
-    if (next === "재방문") return renderSheet(true);
+    if (next === "재방문") return renderSheet("reason");
+    if (next === "완료") return renderSheet("complete"); // 이미 완료여도 관리 체크를 바꿀 수 있게 연다
     if (next === appStatus(p) && next !== "재방문") return; // 이미 그 상태. 상담완료도 여기서 걸러진다
     changeStatus(p.place_id, next);
   });
+}
+
+function completePicker(checked) {
+  return `
+    <label class="check"><input id="manageCheck" type="checkbox" ${checked ? "checked" : ""}> 관리 업장으로 체크</label>
+    <div class="row">
+      <button id="cancelComplete" class="secondary">취소</button>
+      <button id="okComplete" class="primary">완료로 저장</button>
+    </div>`;
 }
 
 function reasonPicker() {
@@ -274,10 +291,12 @@ function reasonPicker() {
 
 /* ---------------- 상태 변경: 화면 먼저, 전송은 뒤에서 ---------------- */
 
-function changeStatus(placeId, appNext, reason, time) {
+function changeStatus(placeId, appNext, reason, time, manage) {
   const p = state.byId[placeId];
   const revisit = appNext === "재방문";
-  const local = { "진행상태": APP_TO_SHEET[appNext], "재방문사유": revisit ? reason : "", "재방문예정시각": revisit ? (time || "") : "" };
+  // 관리 체크는 완료일 때만 남는다. 다른 상태로 바꾸면 해제된다
+  const local = { "진행상태": APP_TO_SHEET[appNext], "재방문사유": revisit ? reason : "", "재방문예정시각": revisit ? (time || "") : "",
+                  "관리": appNext === "완료" && manage === true };
 
   // 화면을 먼저 바꾼다
   state.localValues = state.localValues || {};
@@ -286,7 +305,7 @@ function changeStatus(placeId, appNext, reason, time) {
   Object.assign(p, local);
   paintMarker(placeId);
   renderCounts();
-  if (state.selected === placeId) renderSheet(false);
+  if (state.selected === placeId) renderSheet();
 
   // 업장마다 요청을 하나씩만 보낸다. 응답을 기다리는 동안 다시 누르면 마지막 값만 이어서 보낸다.
   // 요청이 동시에 나가면 도착 순서가 뒤바뀌어 시트에 이전 값이 남을 수 있기 때문이다
@@ -304,8 +323,9 @@ async function sendStatus(placeId) {
     const job = state.desired[placeId];
     delete state.desired[placeId];
     try {
-      const resp = await Backend.setStatus(placeId, job["진행상태"], job["재방문사유"] || undefined, job["재방문예정시각"] || undefined);
-      state.confirmed[placeId] = { "진행상태": resp["진행상태"], "재방문사유": resp["재방문사유"] || "", "재방문예정시각": resp["재방문예정시각"] || "" };
+      const resp = await Backend.setStatus(placeId, job["진행상태"], job["재방문사유"] || undefined, job["재방문예정시각"] || undefined,
+        job["진행상태"] === "관측완료" ? job["관리"] : undefined);
+      state.confirmed[placeId] = { "진행상태": resp["진행상태"], "재방문사유": resp["재방문사유"] || "", "재방문예정시각": resp["재방문예정시각"] || "", "관리": resp["관리"] === true };
       failure = null;
     } catch (err) {
       failure = err;
@@ -323,7 +343,7 @@ async function sendStatus(placeId) {
   else saveMapCache(state.fetchedAt);
   paintMarker(placeId);
   renderCounts();
-  if (state.selected === placeId) renderSheet(false);
+  if (state.selected === placeId) renderSheet();
 }
 
 /* ---------------- 임의 핀 ---------------- */

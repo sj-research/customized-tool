@@ -129,3 +129,8 @@ h3 { margin: 0; font-size: 18px; }
 .plus { padding: 2px 8px; border-radius: 10px; background: #fee500; color: #191919; font-size: 12px; font-weight: 700; }
 .r-empty { padding: 11px 12px; color: #888; font-size: 14px; }
 .r-more { width: 100%; padding: 12px; border: 0; background: #fff; color: #1f3a5f; font-weight: 600; text-align: left; }
+
+/* 관리 체크 */
+.manage { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: #e7f5ec; color: #1b6e3a; font-size: 14px; font-weight: 600; }
+.check { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 14px 12px; border: 1px solid #ccc; border-radius: 10px; font-weight: 700; }
+.check input { width: 22px; height: 22px; margin: 0; accent-color: #1f3a5f; }

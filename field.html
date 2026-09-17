@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>현장 지도</title>
-<link rel="stylesheet" href="css/field.css?v=0.6.0">
+<link rel="stylesheet" href="css/field.css?v=0.7.0">
 <script>
   // 아이폰에는 개발자 도구가 없어서, 스크립트 오류를 화면 맨 위에 보여준다
-  window.APP_VERSION = "0.6.0";
+  window.APP_VERSION = "0.7.0";
   function showFatal(msg) {
     var el = document.getElementById("fatal");
     if (!el) { el = document.createElement("div"); el.id = "fatal"; document.documentElement.appendChild(el); }
@@ -43,7 +43,7 @@
 
 <div id="settings" class="modal" hidden>
   <div class="modal-body">
-    <h3>설정 <small class="muted">v0.6.0</small></h3>
+    <h3>설정 <small class="muted">v0.7.0</small></h3>
     <p id="settingsMsg" class="warn"></p>
     <label>Apps Script 웹 앱 URL <input id="setUrl" type="url" autocomplete="off"></label>
     <label>접근 토큰 <input id="setToken" type="password" autocomplete="off"></label>
@@ -58,7 +58,7 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="js/common.js?v=0.6.0"></script>
-<script src="js/field.js?v=0.6.0"></script>
+<script src="js/common.js?v=0.7.0"></script>
+<script src="js/field.js?v=0.7.0"></script>
 </body>
 </html>
