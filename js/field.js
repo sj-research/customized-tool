@@ -102,6 +102,7 @@ function decorate(p, nameCount) {
   return {
     ...p,
     lat: Number(p.lat), lng: Number(p.lng),
+    bees: isChecked(p["BEES"]),   // BEES 필수 방문 업장. 진행상태는 다른 업장과 같게 관리한다
     displayName: nameCount && nameCount[p["상호명"]] > 1 ? `${p["상호명"]} (${p["주소"] || p.zone_id || ""})` : p["상호명"],
   };
 }
@@ -138,7 +139,16 @@ function saveMapCache(fetchedAt) {
 function renderCounts() {
   const counts = countBy(state.places.map(p => ({ s: appStatus(p) })), "s");
   $("counts").innerHTML = STATUS_ORDER.map(s =>
-    `<span class="cnt"><i style="background:${STATUS_COLOR[s]}"></i>${s} <b>${counts[s] || 0}</b></span>`).join("");
+    `<span class="cnt"><i style="background:${STATUS_COLOR[s]}"></i>${s} <b>${counts[s] || 0}</b></span>`).join("")
+    + beesCount();
+}
+
+// BEES는 네 상태 숫자에도 함께 세고, 완료한 곳 수를 따로 보여준다
+function beesCount() {
+  const bees = state.places.filter(p => p.bees);
+  if (!bees.length) return "";
+  const done = bees.filter(p => appStatus(p) === "완료").length;
+  return `<span class="cnt bees"><i></i>BEES <b>${done}/${bees.length}</b></span>`;
 }
 
 /* ---------------- 지도 ---------------- */
@@ -188,10 +198,12 @@ function paintMarker(placeId) {
   const o = state.overlays[placeId];
   const p = state.byId[placeId];
   if (!o || !p) return;
-  o.el.style.background = STATUS_COLOR[appStatus(p)];
+  // BEES는 점선 테두리. 방문 전에는 미조사 색 대신 흰색으로 둔다
+  o.el.classList.toggle("bees", p.bees);
+  o.el.style.background = p.bees && appStatus(p) === "미조사" ? "#fff" : STATUS_COLOR[appStatus(p)];
   o.el.classList.toggle("selected", state.selected === placeId);
   o.el.classList.toggle("pending", !!state.pending[placeId]);
-  o.el.setAttribute("aria-label", `${p.displayName} ${appStatus(p)}`);
+  o.el.setAttribute("aria-label", `${p.bees ? "BEES " : ""}${p.displayName} ${appStatus(p)}`);
 }
 
 function updateMarkerVisibility() {
@@ -232,7 +244,7 @@ function renderSheet(mode) {
 
   $("sheet").innerHTML = `
     <div class="s-head">
-      <div><h3>${esc(p.displayName)}</h3>${kind ? `<p class="muted">${esc(kind)}</p>` : ""}</div>
+      <div><h3>${p.bees ? `<span class="bees-tag">BEES</span>` : ""}${esc(p.displayName)}</h3>${kind ? `<p class="muted">${esc(kind)}</p>` : ""}</div>
       <button class="x" id="closeSheet" aria-label="닫기">✕</button>
     </div>
     ${revisitLine}${manageLine}

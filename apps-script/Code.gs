@@ -19,6 +19,7 @@
  *   mapData        현장 지도용 읽기. zones, places만. { }
  *   setStatus      places 진행상태 변경. { place_id, status, reason?, time?, manage? }
  *   addPlace       places에 새 행. 임의 핀 { name, lat, lng }, 검색 결과 { name, lat, lng, kakao: { id, category, address, url } }
+ *   setBees        BEES 필수 방문 업장 일괄 반영. 있으면 BEES 체크만, 없으면 새 행. { items: [{ name, lat, lng, address?, url?, kakao? }] }
  *
  * 스크립트 속성
  *   ACCESS_TOKEN       접근 토큰 (setupToken으로 생성)
@@ -27,7 +28,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.7";
+const API_VERSION = "0.8";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -84,6 +85,8 @@ function doPost(e) {
         return json_(withLock_(() => setStatus_(req)));
       case "addPlace":
         return json_(withLock_(() => addPlace_(req)));
+      case "setBees":
+        return json_(withLock_(() => setBees_(req)));
       default:
         return json_({ ok: false, error: "unknown_action" });
     }
@@ -652,7 +655,8 @@ function updatePlaceStatus_(placeId, result, observations, date) {
 // 앱이 쓰는 진행상태 값. 상담완료는 앱이 쓰지 않고, 이미 상담완료면 완료로 바꿔도 덮어쓰지 않는다
 const MAP_STATUS = ["미방문", "관측완료", "재방문필요", "제외"];
 const REVISIT_REASONS = ["키맨 부재", "브레이크 타임", "영업 전", "기타"];
-const PLACE_EXTRA_COLUMNS = ["재방문사유", "재방문예정시각", "관리"];
+const PLACE_EXTRA_COLUMNS = ["재방문사유", "재방문예정시각", "관리", "BEES"];
+const PLACE_CHECKBOX_COLUMNS = ["관리", "BEES"];
 
 /** 헤더에 컬럼이 없으면 맨 뒤에 추가한다. { col, added } */
 function addHeaderColumn_(sheet, name) {
@@ -666,13 +670,13 @@ function addHeaderColumn_(sheet, name) {
   return { col, added: true };
 }
 
-/** places에 재방문사유, 재방문예정시각, 관리 컬럼이 없으면 추가한다. 재방문사유에는 드롭다운, 관리에는 체크박스를 건다 */
+/** places에 재방문사유, 재방문예정시각, 관리, BEES 컬럼이 없으면 추가한다. 재방문사유에는 드롭다운, 관리와 BEES에는 체크박스를 건다 */
 function ensurePlaceColumns_() {
   const places = SpreadsheetApp.getActive().getSheetByName("places");
   return PLACE_EXTRA_COLUMNS.map(name => {
     const r = addHeaderColumn_(places, name);
     if (r.added && name === "재방문사유") setListValidation_(places, r.col, REVISIT_REASONS);
-    if (r.added && name === "관리") {
+    if (r.added && PLACE_CHECKBOX_COLUMNS.includes(name)) {
       const rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
       places.getRange(2, r.col, places.getMaxRows() - 1, 1).setDataValidation(rule);
     }
@@ -744,6 +748,56 @@ function addPlace_(req) {
   }
   writeRow_(sheet, firstEmptyRow_(sheet), values, null);
   return { ok: true, duplicate: false, place: values };
+}
+
+/**
+ * BEES 필수 방문 업장을 반영한다. 여러 번 실행해도 결과가 같다
+ * 카카오 업장은 kakao_id로, 카카오에 없는 업장은 상호명과 주소로 기존 행을 찾는다
+ * 기존 행은 BEES만 체크하고 다른 칸은 건드리지 않는다. 없으면 진행상태 미방문으로 새 행을 만든다
+ */
+function setBees_(req) {
+  const items = Array.isArray(req.items) ? req.items : [];
+  if (!items.length || items.length > 100) throw new InputError("items는 1건 이상 100건 이하여야 합니다");
+  ensurePlaceColumns_();
+  const sheet = SpreadsheetApp.getActive().getSheetByName("places");
+  const beesCol = headerIndex_(sheet, "BEES");
+  const places = readSheet_("places");
+  const today = Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd");
+  const same = (a, b) => String(a || "").replace(/\s+/g, "") === String(b || "").replace(/\s+/g, "");
+
+  const results = items.map(item => {
+    const name = String(item.name || "").trim();
+    const lat = Number(item.lat), lng = Number(item.lng);
+    if (!name || name.length > 100) throw new InputError(`상호명이 올바르지 않습니다: ${name}`);
+    if (!(lat > 33 && lat < 39 && lng > 124 && lng < 132)) throw new InputError(`좌표가 올바르지 않습니다: ${name}`);
+    const kakao = item.kakao && typeof item.kakao === "object" ? item.kakao : null;
+    if (kakao && !/^\d+$/.test(String(kakao.id || ""))) throw new InputError(`카카오 업장 id가 올바르지 않습니다: ${name}`);
+    const address = String((kakao && kakao.address) || item.address || "");
+
+    const existing = kakao
+      ? places.find(p => String(p.kakao_id || "") === String(kakao.id))
+      : places.find(p => same(p["상호명"], name) && same(p["주소"], address));
+    if (existing) {
+      sheet.getRange(findRow_(sheet, String(existing.place_id)), beesCol).setValue(true);
+      return { name, place_id: String(existing.place_id), result: "기존 행에 BEES 체크" };
+    }
+    const placeId = "P" + String(maxIdNumber_(sheet, "P") + 1).padStart(3, "0");
+    const values = {
+      "place_id": placeId, "zone_id": zoneOfPoint_(lng, lat), "상호명": name, "상호명_상태": kakao ? "확정" : "확인대기",
+      "대상유형": "POC", "출처": kakao ? "카카오" : "현장추가", "POC seg_상태": "확인대기", "lat": lat, "lng": lng,
+      "좌표출처": kakao ? "카카오" : "수동", "주소": address, "지도링크": String((kakao && kakao.url) || item.url || ""),
+      "진행상태": "미방문", "최초조사일": today, "BEES": true,
+      "비고": kakao ? "BEES 목록" : "BEES 목록. 카카오 미등록, 전달받은 주소로 좌표 지정",
+    };
+    if (kakao) {
+      values["kakao_id"] = String(kakao.id);
+      values["카카오 업종"] = String(kakao.category || "");
+    }
+    writeRow_(sheet, firstEmptyRow_(sheet), values, null);
+    places.push(values);
+    return { name, place_id: placeId, result: "새 행 추가" };
+  });
+  return { ok: true, results };
 }
 
 /** zones 경계(MultiPolygon)에 들어가는 구역. 없으면 빈 문자열 */

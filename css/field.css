@@ -22,6 +22,7 @@ h3 { margin: 0; font-size: 18px; }
 .cnt { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 14px; white-space: nowrap; }
 .cnt i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
 .cnt b { font-size: 16px; }
+.cnt.bees { grid-column: 1 / -1; font-size: 13px; }
 
 /* 지도 */
 .map-wrap { flex: 1; position: relative; min-height: 0; }
@@ -134,3 +135,9 @@ h3 { margin: 0; font-size: 18px; }
 .manage { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: #e7f5ec; color: #1b6e3a; font-size: 14px; font-weight: 600; }
 .check { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 14px 12px; border: 1px solid #ccc; border-radius: 10px; font-weight: 700; }
 .check input { width: 22px; height: 22px; margin: 0; accent-color: #1f3a5f; }
+
+/* BEES 필수 방문 업장: 점선 테두리 */
+.mk.bees { width: 22px; height: 22px; border: 3px dashed #1f3a5f; }
+.mk.bees.selected { width: 28px; height: 28px; }
+.cnt.bees i { background: #fff; border: 2px dashed #1f3a5f; width: 12px; height: 12px; }
+.bees-tag { display: inline-block; margin-right: 6px; padding: 1px 6px; border: 2px dashed #1f3a5f; border-radius: 6px; font-size: 12px; color: #1f3a5f; vertical-align: middle; }
