@@ -18,7 +18,7 @@
  *   saveVisit      방문 저장. visits 1행, observations 여러 행, places 진행상태 갱신. { visit: {...} }
  *   mapData        현장 지도용 읽기. zones, places만. { }
  *   setStatus      places 진행상태 변경. { place_id, status, reason?, time?, manage? }
- *   addPlace       places에 새 행. 임의 핀 { name, lat, lng }, 검색 결과 { name, lat, lng, kakao: { id, category, address, url } }
+ *   addPlace       places에 새 행. 임의 핀 { name, lat, lng }, 검색 결과 { name, lat, lng, kakao: { id, category, address, url } }, 비고 지정 note?
  *   setBees        BEES 필수 방문 업장 일괄 반영. 있으면 BEES 체크만, 없으면 새 행. { items: [{ name, lat, lng, address?, url?, kakao? }] }
  *
  * 스크립트 속성
@@ -28,7 +28,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.8";
+const API_VERSION = "0.9";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -655,8 +655,7 @@ function updatePlaceStatus_(placeId, result, observations, date) {
 // 앱이 쓰는 진행상태 값. 상담완료는 앱이 쓰지 않고, 이미 상담완료면 완료로 바꿔도 덮어쓰지 않는다
 const MAP_STATUS = ["미방문", "관측완료", "재방문필요", "제외"];
 const REVISIT_REASONS = ["키맨 부재", "브레이크 타임", "영업 전", "기타"];
-const PLACE_EXTRA_COLUMNS = ["재방문사유", "재방문예정시각", "관리", "BEES"];
-const PLACE_CHECKBOX_COLUMNS = ["관리", "BEES"];
+const PLACE_EXTRA_COLUMNS = ["재방문사유", "재방문예정시각", "관리"];
 
 /** 헤더에 컬럼이 없으면 맨 뒤에 추가한다. { col, added } */
 function addHeaderColumn_(sheet, name) {
@@ -667,21 +666,29 @@ function addHeaderColumn_(sheet, name) {
   const ref = sheet.getRange(1, 1);
   sheet.getRange(1, col).setValue(name)
     .setFontWeight("bold").setFontColor(ref.getFontColor()).setBackground(ref.getBackground());
+  // 끼워 넣은 열은 왼쪽 열의 데이터 확인 규칙(드롭다운 등)을 물려받는다. 새 열은 규칙 없이 시작한다
+  sheet.getRange(2, col, sheet.getMaxRows() - 1, 1).clearDataValidations();
   return { col, added: true };
 }
 
-/** places에 재방문사유, 재방문예정시각, 관리, BEES 컬럼이 없으면 추가한다. 재방문사유에는 드롭다운, 관리와 BEES에는 체크박스를 건다 */
+/** places에 재방문사유, 재방문예정시각, 관리 컬럼이 없으면 추가한다. 재방문사유에는 드롭다운, 관리에는 체크박스를 건다 */
 function ensurePlaceColumns_() {
   const places = SpreadsheetApp.getActive().getSheetByName("places");
   return PLACE_EXTRA_COLUMNS.map(name => {
     const r = addHeaderColumn_(places, name);
     if (r.added && name === "재방문사유") setListValidation_(places, r.col, REVISIT_REASONS);
-    if (r.added && PLACE_CHECKBOX_COLUMNS.includes(name)) {
-      const rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
-      places.getRange(2, r.col, places.getMaxRows() - 1, 1).setDataValidation(rule);
+    if (r.added && name === "관리") setCheckboxValidation_(places, r.col);
+    // 0.8까지는 재방문예정시각 열이 재방문사유 드롭다운을 물려받아 시간을 쓰면 오류가 났다. 남아 있으면 지운다
+    if (name === "재방문예정시각" && places.getRange(2, r.col).getDataValidation()) {
+      places.getRange(2, r.col, places.getMaxRows() - 1, 1).clearDataValidations();
     }
     return { name, ...r };
   });
+}
+
+function setCheckboxValidation_(sheet, col) {
+  const rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+  sheet.getRange(2, col, sheet.getMaxRows() - 1, 1).setDataValidation(rule);
 }
 
 function setStatus_(req) {
@@ -706,7 +713,8 @@ function setStatus_(req) {
   if (!keepConsult) sheet.getRange(row, statusCol).setValue(next);
   // 재방문이 아니면 사유와 예정시각을 비운다. 이전 재방문 사유가 남아 헷갈리지 않게 한다
   sheet.getRange(row, reasonCol).setValue(revisit ? req.reason : "");
-  sheet.getRange(row, timeCol).setValue(time);
+  // 일반 서식이면 14:00은 시각, 12는 숫자로 바뀐다. 입력한 글자 그대로 남기려고 텍스트 서식으로 쓴다
+  sheet.getRange(row, timeCol).setNumberFormat("@").setValue(time);
   // 관리 체크는 완료일 때만 둔다. 완료가 아니게 되면 해제한다. 완료인데 값이 안 오면 기존 값을 유지한다
   const manageCell = sheet.getRange(row, manageCol);
   if (req.status !== "관측완료") manageCell.setValue(false);
@@ -738,7 +746,7 @@ function addPlace_(req) {
     "place_id": placeId, "zone_id": zoneOfPoint_(lng, lat), "상호명": name, "상호명_상태": kakao ? "확정" : "확인대기",
     "대상유형": "POC", "출처": "현장추가", "POC seg_상태": "확인대기", "lat": lat, "lng": lng, "좌표출처": kakao ? "카카오" : "수동",
     "진행상태": "미방문", "최초조사일": Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd"),
-    "비고": kakao ? "현장 지도 검색으로 추가" : "현장 지도 임의 핀",
+    "비고": req.note ? String(req.note).slice(0, 100) : kakao ? "현장 지도 검색으로 추가" : "현장 지도 임의 핀",
   };
   if (kakao) {
     values["kakao_id"] = String(kakao.id);
@@ -760,7 +768,9 @@ function setBees_(req) {
   if (!items.length || items.length > 100) throw new InputError("items는 1건 이상 100건 이하여야 합니다");
   ensurePlaceColumns_();
   const sheet = SpreadsheetApp.getActive().getSheetByName("places");
-  const beesCol = headerIndex_(sheet, "BEES");
+  const bees = addHeaderColumn_(sheet, "BEES");
+  if (bees.added) setCheckboxValidation_(sheet, bees.col);
+  const beesCol = bees.col;
   const places = readSheet_("places");
   const today = Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd");
   const same = (a, b) => String(a || "").replace(/\s+/g, "") === String(b || "").replace(/\s+/g, "");

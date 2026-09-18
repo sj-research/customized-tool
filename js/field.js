@@ -568,6 +568,10 @@ window.__simulatePosition = (lat, lng, accuracy = 10, t = Date.now()) =>
 
 const SEARCH_LOCAL_MAX = 20;
 const KAKAO_MAX_PAGES = 3;          // 카카오 키워드 검색은 한 페이지 15건. 최대 45건까지 본다
+// 구역 폴리곤 밖이지만 카카오 검색을 허용하는 곳. 지도에 구역은 그리지 않는다
+const EXTRA_SEARCH_AREAS = [
+  { name: "신설동", lat: 37.5760299683175, lng: 127.024456700382, radius: 700 },   // 신설동역 1호선. 9월 18일 추가
+];
 const search = { timer: null, query: "", kakao: null, kakaoQuery: "", kakaoLoading: false, kakaoError: "" };
 
 // 검색에 카카오 장소 검색(services) 라이브러리가 필요하다. 준비 모드와 같이 쓰는 common.js는 건드리지 않고 여기서 불러온다
@@ -653,30 +657,48 @@ function searchKakao(query) {
   search.kakaoError = "";
   search.kakao = null;
   const listed = new Set(state.places.map(p => String(p.kakao_id || "")).filter(Boolean));
-  const found = [];
-  let page = 0;
-  const onResult = (data, status, pagination) => {
-    if (search.kakaoQuery !== query) return; // 그 사이 검색어가 바뀜
-    if (status === kakao.maps.services.Status.ERROR) {
+  const found = new Map();
+  // 구역 전체를 감싸는 사각형 한 번, 추가 검색 지역마다 반경으로 한 번씩 찾는다
+  const areas = [{ bounds: zonesBounds() }, ...EXTRA_SEARCH_AREAS.map(a => ({ location: new kakao.maps.LatLng(a.lat, a.lng), radius: a.radius }))];
+  const places = new kakao.maps.services.Places();
+
+  const runArea = i => {
+    if (i >= areas.length) {
+      search.kakao = [...found.values()];
       search.kakaoLoading = false;
-      search.kakaoError = "카카오 검색에 실패했습니다. 통신 상태를 확인하세요";
       return renderSearch();
     }
-    (data || []).forEach(d => {
-      const lat = Number(d.y), lng = Number(d.x);
-      const zone = zoneOfPoint(lng, lat);
-      if (!zone || listed.has(String(d.id))) return; // 구역 밖이거나 이미 명단에 있는 업장은 뺀다
-      found.push({ id: String(d.id), name: d.place_name, lat, lng, zone, category: d.category_name,
-                   address: d.road_address_name || d.address_name, url: d.place_url });
-    });
-    page++;
-    if (pagination && pagination.hasNextPage && page < KAKAO_MAX_PAGES) return pagination.nextPage();
-    search.kakao = found;
-    search.kakaoLoading = false;
-    renderSearch();
+    let page = 0;
+    const onResult = (data, status, pagination) => {
+      if (search.kakaoQuery !== query) return; // 그 사이 검색어가 바뀜
+      if (status === kakao.maps.services.Status.ERROR) {
+        search.kakaoLoading = false;
+        search.kakaoError = "카카오 검색에 실패했습니다. 통신 상태를 확인하세요";
+        return renderSearch();
+      }
+      (data || []).forEach(d => {
+        const lat = Number(d.y), lng = Number(d.x);
+        const zone = searchAreaOf(lng, lat);
+        if (!zone || listed.has(String(d.id)) || found.has(String(d.id))) return; // 범위 밖이거나 이미 명단에 있는 업장은 뺀다
+        found.set(String(d.id), { id: String(d.id), name: d.place_name, lat, lng, zone, category: d.category_name,
+                                  address: d.road_address_name || d.address_name, url: d.place_url });
+      });
+      page++;
+      if (pagination && pagination.hasNextPage && page < KAKAO_MAX_PAGES) return pagination.nextPage();
+      runArea(i + 1);
+    };
+    places.keywordSearch(query, onResult, { ...areas[i], size: 15 });
   };
-  new kakao.maps.services.Places().keywordSearch(query, onResult, { bounds: zonesBounds(), size: 15 });
+  runArea(0);
   renderSearch();
+}
+
+// 구역 안이면 zone_id, 추가 검색 지역 반경 안이면 지역 이름, 둘 다 아니면 빈 문자열
+function searchAreaOf(lng, lat) {
+  const zone = zoneOfPoint(lng, lat);
+  if (zone) return zone;
+  const area = EXTRA_SEARCH_AREAS.find(a => distanceM(a.lat, a.lng, lat, lng) <= a.radius);
+  return area ? area.name : "";
 }
 
 function renderSearch() {
@@ -701,13 +723,13 @@ function renderSearch() {
           <span class="plus">추가</span><span class="r-name">${esc(k.name)}</span>
           <small>${esc(k.zone)} / ${esc(String(k.category || "").split(">").slice(1).map(x => x.trim()).join(" > "))}</small>
           <small class="r-addr">${esc(k.address || "")}</small></button></li>`).join("")
-      : `<li class="r-empty">구역 안에서 명단에 없는 카카오 업장이 없습니다</li>`;
+      : `<li class="r-empty">검색 범위 안에서 명단에 없는 카카오 업장이 없습니다</li>`;
   } else {
     kakaoHtml = `<li><button class="r-more" id="kakaoMore">명단에 없나요? 카카오에서 찾기</button></li>`;
   }
 
   box.innerHTML = `<p class="r-head">명단</p><ul>${localHtml}</ul>
-    <p class="r-head">카카오 (구역 안, 명단에 없는 업장)</p><ul>${kakaoHtml}</ul>`;
+    <p class="r-head">카카오 (구역 안과 ${EXTRA_SEARCH_AREAS.map(a => a.name).join(", ")} 근처, 명단에 없는 업장)</p><ul>${kakaoHtml}</ul>`;
   box.hidden = false;
   box.querySelectorAll("[data-local]").forEach(b => b.onclick = () => { closeSearch(); focusPlace(b.dataset.local); });
   box.querySelectorAll("[data-kakao]").forEach(b => b.onclick = () => {
