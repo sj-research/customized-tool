@@ -19,6 +19,8 @@
  *   mapData        현장 지도용 읽기. zones, places만. { }
  *   setStatus      places 진행상태 변경. { place_id, status, reason?, time?, manage? }
  *   addPlace       places에 새 행. 임의 핀 { name, lat, lng }, 검색 결과 { name, lat, lng, kakao: { id, category, address, url } }, 비고 지정 note?
+ *   saveSurvey     "전수 조사" 탭에 표를 쓴다. 이미 내용이 있으면 overwrite: true일 때만 덮어쓴다. { headers[], rows[][], overwrite? }
+ *   addDictionary  사전 탭에 행 추가. 같은 인식결과가 있으면 건너뛴다. { items: [{ 구분, 용어 또는 인식결과, 의미 또는 교정, 상태, 비고 }] }
  *   setBees        BEES 필수 방문 업장 일괄 반영. 있으면 BEES 체크만, 없으면 새 행. { items: [{ name, lat, lng, address?, url?, kakao? }] }
  *
  * 스크립트 속성
@@ -28,7 +30,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.9";
+const API_VERSION = "0.10";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -87,6 +89,10 @@ function doPost(e) {
         return json_(withLock_(() => addPlace_(req)));
       case "setBees":
         return json_(withLock_(() => setBees_(req)));
+      case "saveSurvey":
+        return json_(withLock_(() => saveSurvey_(req)));
+      case "addDictionary":
+        return json_(withLock_(() => addDictionary_(req)));
       default:
         return json_({ ok: false, error: "unknown_action" });
     }
@@ -763,6 +769,53 @@ function addPlace_(req) {
  * 카카오 업장은 kakao_id로, 카카오에 없는 업장은 상호명과 주소로 기존 행을 찾는다
  * 기존 행은 BEES만 체크하고 다른 칸은 건드리지 않는다. 없으면 진행상태 미방문으로 새 행을 만든다
  */
+const SURVEY_TAB = "전수 조사";
+
+/** 현장 녹음을 정리한 표를 "전수 조사" 탭에 쓴다. 손으로 고친 내용을 실수로 지우지 않게, 이미 있으면 overwrite가 있어야 덮어쓴다 */
+function saveSurvey_(req) {
+  const headers = Array.isArray(req.headers) ? req.headers.map(h => String(h).trim()) : [];
+  const rows = Array.isArray(req.rows) ? req.rows : [];
+  if (!headers.length || headers.length > 40 || headers.some(h => !h)) throw new InputError("headers가 올바르지 않습니다");
+  if (rows.length > 3000 || rows.some(r => !Array.isArray(r) || r.length !== headers.length)) throw new InputError("rows는 headers와 칸 수가 같은 배열이어야 합니다");
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(SURVEY_TAB);
+  if (sheet && sheet.getLastRow() > 1 && req.overwrite !== true) {
+    throw new InputError(`${SURVEY_TAB} 탭에 이미 ${sheet.getLastRow() - 1}행이 있습니다. 덮어쓰려면 overwrite를 켜세요`);
+  }
+  if (!sheet) sheet = ss.insertSheet(SURVEY_TAB);
+  sheet.clearContents();
+  if (sheet.getMaxColumns() < headers.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), headers.length - sheet.getMaxColumns());
+  if (sheet.getMaxRows() < rows.length + 1) sheet.insertRowsAfter(sheet.getMaxRows(), rows.length + 1 - sheet.getMaxRows());
+  const values = [headers, ...rows.map(r => r.map(v => (v === null || v === undefined ? "" : String(v))))];
+  // 날짜처럼 보이는 값이 바뀌지 않게 텍스트 서식으로 쓴다
+  sheet.getRange(1, 1, values.length, headers.length).setNumberFormat("@").setValues(values);
+  const ref = ss.getSheetByName("places").getRange(1, 1);
+  sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold").setFontColor(ref.getFontColor()).setBackground(ref.getBackground());
+  sheet.setFrozenRows(1);
+  return { ok: true, tab: SURVEY_TAB, rows: rows.length };
+}
+
+const DICTIONARY_FIELDS = ["구분", "용어 또는 인식결과", "의미 또는 교정", "상태", "비고"];
+
+function addDictionary_(req) {
+  const items = Array.isArray(req.items) ? req.items : [];
+  if (!items.length || items.length > 200) throw new InputError("items는 1건 이상 200건 이하여야 합니다");
+  const sheet = SpreadsheetApp.getActive().getSheetByName("사전");
+  if (!sheet) throw new InputError("사전 탭이 없습니다");
+  const existing = new Set(readSheet_("사전").map(r => String(r["용어 또는 인식결과"] || "").trim()));
+  const results = items.map(item => {
+    const values = {};
+    DICTIONARY_FIELDS.forEach(f => { values[f] = String(item[f] || "").trim().slice(0, 300); });
+    const key = values["용어 또는 인식결과"];
+    if (!values["구분"] || !key) throw new InputError("구분과 용어 또는 인식결과는 필수입니다");
+    if (existing.has(key)) return { term: key, result: "이미 있음" };
+    writeRow_(sheet, sheet.getLastRow() + 1, values, null);
+    existing.add(key);
+    return { term: key, result: "추가" };
+  });
+  return { ok: true, results };
+}
+
 function setBees_(req) {
   const items = Array.isArray(req.items) ? req.items : [];
   if (!items.length || items.length > 100) throw new InputError("items는 1건 이상 100건 이하여야 합니다");
