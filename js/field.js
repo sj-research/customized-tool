@@ -166,13 +166,15 @@ function initMap() {
   initLongPress();
 }
 
+// 구역 경계는 회색으로 그린다. 시트 zones 탭에 TOBE 행이 있으면 서버가 TOBE만 준다 (Zones Polygon 조사 현황 화면과 같은 색)
+const ZONE_COLOR = "#8a8f98";
 function drawZones() {
   state.zones.forEach(z => {
-    if (!z.geometry) return;
+    if (!z.geometry) return;   // 신설동 S3, S4처럼 폴리곤 없이 정의한 구역은 그리지 않는다
     z.geometry.coordinates.forEach(poly => {
       new kakao.maps.Polygon({
         map: state.map, path: poly[0].map(([lng, lat]) => new kakao.maps.LatLng(lat, lng)),
-        strokeWeight: 2, strokeColor: "#1f3a5f", strokeOpacity: 0.7, fillColor: "#1f3a5f", fillOpacity: 0.06,
+        strokeWeight: 2, strokeColor: ZONE_COLOR, strokeOpacity: 0.95, fillColor: ZONE_COLOR, fillOpacity: 0.12,
       });
     });
   });

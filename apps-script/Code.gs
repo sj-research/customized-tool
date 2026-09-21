@@ -16,11 +16,12 @@
  *   savePlan       routing_plans 저장. { plan: { plan_id?, date, zones[], order[], actualOrder[], memo } }
  *   structure      녹음 원문을 Claude로 구조화. 저장하지 않는다. { place_id, text }
  *   saveVisit      방문 저장. visits 1행, observations 여러 행, places 진행상태 갱신. { visit: {...} }
- *   mapData        현장 지도용 읽기. zones, places와 블로그 노출 목록. { }
+ *   mapData        현장 지도용 읽기. zones(TOBE가 있으면 TOBE만), places와 블로그 노출 목록. { }
  *   setStatus      places 진행상태 변경. { place_id, status, reason?, time?, manage? }
  *   addPlace       places에 새 행. 임의 핀 { name, lat, lng }, 검색 결과 { name, lat, lng, kakao: { id, category, address, url } }, 비고 지정 note?
  *   saveSurvey     탭에 표를 쓴다. 기본 탭은 "전수 조사". 이미 내용이 있으면 overwrite: true일 때만 덮어쓴다. { headers[], rows[][], tab?, overwrite? }
  *   addDictionary  사전 탭에 행 추가. 같은 인식결과가 있으면 건너뛴다. { items: [{ 구분, 용어 또는 인식결과, 의미 또는 교정, 상태, 비고 }] }
+ *   setZonesTobe   zones 탭 1열 "구분"(ASIS, TOBE)을 만들고 TOBE 구역 행을 ASIS 행 아래에 새로 쓴다. { zones: [{ zone_id, 구역명, 경계, ... }] }
  *   setBees        BEES 필수 방문 업장 일괄 반영. 있으면 BEES 체크만, 없으면 새 행. { items: [{ name, lat, lng, address?, url?, kakao? }] }
  *
  * 스크립트 속성
@@ -30,7 +31,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.11";
+const API_VERSION = "0.12";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -68,7 +69,8 @@ function doPost(e) {
           fetchedAt: formatDate_(new Date(), true),
           data: READ_SHEETS.concat(OPTIONAL_SHEETS).reduce((acc, name) => {
             const exists = !!SpreadsheetApp.getActive().getSheetByName(name);
-            acc[name] = exists || READ_SHEETS.includes(name) ? readSheet_(name) : [];
+            // zones는 ASIS만 준다. 준비 모드(prep)는 기존 Z1~Z9로 동작한다
+            acc[name] = name === "zones" ? zonesOf_("ASIS") : exists || READ_SHEETS.includes(name) ? readSheet_(name) : [];
             return acc;
           }, {}),
         });
@@ -82,13 +84,15 @@ function doPost(e) {
         return json_(saveVisit_(req.visit));
       case "mapData":
         return json_({ ok: true, version: API_VERSION, fetchedAt: formatDate_(new Date(), true),
-                       data: { zones: readSheet_("zones"), places: readSheet_("places"), blogRank: blogRank_() } });
+                       data: { zones: mapZones_(), places: readSheet_("places"), blogRank: blogRank_() } });
       case "setStatus":
         return json_(withLock_(() => setStatus_(req)));
       case "addPlace":
         return json_(withLock_(() => addPlace_(req)));
       case "setBees":
         return json_(withLock_(() => setBees_(req)));
+      case "setZonesTobe":
+        return json_(withLock_(() => setZonesTobe_(req)));
       case "saveSurvey":
         return json_(withLock_(() => saveSurvey_(req)));
       case "addDictionary":
@@ -137,7 +141,12 @@ function setBoundaries_(boundaries) {
   const sheet = SpreadsheetApp.getActive().getSheetByName("zones");
   const boundaryCol = headerIndex_(sheet, "경계");
   if (!boundaryCol) throw new Error("zones 탭에 경계 컬럼이 없습니다");
-  const ids = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 1), 1).getValues().map(r => String(r[0]).trim());
+  // zones 1열이 "구분"이 된 뒤에도 동작하도록 zone_id 칸으로 찾고, ASIS 행만 고친다
+  const idCol = headerIndex_(sheet, "zone_id");
+  const kindCol = headerIndex_(sheet, ZONE_KIND_HEADER);
+  const n = Math.max(sheet.getLastRow() - 1, 1);
+  const kinds = kindCol ? sheet.getRange(2, kindCol, n, 1).getValues().map(r => String(r[0]).trim()) : [];
+  const ids = sheet.getRange(2, idCol, n, 1).getValues().map((r, i) => (kinds[i] === "TOBE" ? "" : String(r[0]).trim()));
 
   const updated = [], unknown = [];
   Object.keys(boundaries).forEach(zoneId => {
@@ -302,7 +311,7 @@ const HEADER_BG = "#1f3a5f";
 // 상호명 칸: B열 place_id로 places 상호명을 찾는다. zone_id면 구역명. 한 칸짜리 배열 수식이라 새 행에도 자동 적용된다
 const NAME_ARRAY_FORMULA =
   '={"상호명";ARRAYFORMULA(IF(B2:B="","",IFERROR(VLOOKUP(B2:B,{places!A:A,places!C:C},2,FALSE),' +
-  'IFERROR(VLOOKUP(B2:B,{zones!A:A,zones!C:C},2,FALSE),"확인필요"))))}';
+  'IFERROR(VLOOKUP(B2:B,{zones!B:B,zones!D:D},2,FALSE),"확인필요"))))}';   // zones 1열은 구분, 2열 zone_id, 4열 구역명
 
 const NEW_SHEETS = {
   visits: {
@@ -769,6 +778,64 @@ function addPlace_(req) {
  * 카카오 업장은 kakao_id로, 카카오에 없는 업장은 상호명과 주소로 기존 행을 찾는다
  * 기존 행은 BEES만 체크하고 다른 칸은 건드리지 않는다. 없으면 진행상태 미방문으로 새 행을 만든다
  */
+const ZONE_KIND_HEADER = "구분";
+
+/** zones 탭 행 중 구분이 kind인 것. 구분 칸이 없으면 모두 ASIS로 본다 */
+function zonesOf_(kind) {
+  return readSheet_("zones").filter(z => (String(z[ZONE_KIND_HEADER] || "ASIS").trim() || "ASIS") === kind);
+}
+
+/** 현장 지도 구역. TOBE 행이 있으면 TOBE, 없으면 ASIS */
+function mapZones_() {
+  const tobe = zonesOf_("TOBE");
+  return tobe.length ? tobe : zonesOf_("ASIS");
+}
+
+/**
+ * zones 탭에 TOBE 구역을 쓴다. 여러 번 실행해도 결과가 같다
+ * 1. 1열이 "구분"이 아니면 맨 앞에 열을 끼우고 기존 행을 ASIS로 채운다 (기존 수식 참조는 시트가 함께 옮긴다)
+ * 2. 기존 TOBE 행을 지우고 ASIS 행 아래에 새로 쓴다
+ */
+function setZonesTobe_(req) {
+  const zones = Array.isArray(req.zones) ? req.zones : [];
+  if (!zones.length || zones.length > 50) throw new InputError("zones는 1건 이상 50건 이하여야 합니다");
+  zones.forEach(z => {
+    if (!/^[A-Z]\d{1,2}$/.test(String(z.zone_id || ""))) throw new InputError(`zone_id가 올바르지 않습니다: ${z.zone_id}`);
+    if (z["경계"]) {
+      const g = JSON.parse(z["경계"]);
+      if (!g || g.type !== "MultiPolygon") throw new InputError(`${z.zone_id} 경계가 MultiPolygon이 아닙니다`);
+    }
+  });
+  const sheet = SpreadsheetApp.getActive().getSheetByName("zones");
+  if (String(sheet.getRange(1, 1).getValue()).trim() !== ZONE_KIND_HEADER) {
+    sheet.insertColumnBefore(1);
+    const ref = sheet.getRange(1, 2);
+    sheet.getRange(1, 1).setValue(ZONE_KIND_HEADER).setFontWeight("bold").setFontColor(ref.getFontColor()).setBackground(ref.getBackground());
+    const idCol = headerIndex_(sheet, "zone_id");
+    const last = sheet.getLastRow();
+    if (last > 1) {
+      const ids = sheet.getRange(2, idCol, last - 1, 1).getValues();
+      sheet.getRange(2, 1, last - 1, 1).setValues(ids.map(r => [String(r[0]).trim() ? "ASIS" : ""]));
+    }
+  }
+  // 기존 TOBE 행 삭제 (아래에서 위로)
+  const last = sheet.getLastRow();
+  if (last > 1) {
+    const kinds = sheet.getRange(2, 1, last - 1, 1).getValues();
+    for (let i = kinds.length - 1; i >= 0; i--) {
+      if (String(kinds[i][0]).trim() === "TOBE") sheet.deleteRow(i + 2);
+    }
+  }
+  const start = sheet.getLastRow() + 1;
+  if (sheet.getMaxRows() < start + zones.length) sheet.insertRowsAfter(sheet.getMaxRows(), start + zones.length - sheet.getMaxRows());
+  zones.forEach((z, i) => {
+    const values = { [ZONE_KIND_HEADER]: "TOBE" };
+    Object.keys(z).forEach(k => { values[k] = z[k] === null || z[k] === undefined ? "" : z[k]; });
+    writeRow_(sheet, start + i, values, null);
+  });
+  return { ok: true, asisRows: start - 2, tobeRows: zones.length };
+}
+
 const SURVEY_TAB = "전수 조사";
 const BLOG_RANK_TAB = "블로그 노출";
 
@@ -871,9 +938,9 @@ function setBees_(req) {
   return { ok: true, results };
 }
 
-/** zones 경계(MultiPolygon)에 들어가는 구역. 없으면 빈 문자열 */
+/** zones 경계(MultiPolygon)에 들어가는 구역. 없으면 빈 문자열. places.zone_id는 ASIS 기준을 유지한다 */
 function zoneOfPoint_(lng, lat) {
-  for (const z of readSheet_("zones")) {
+  for (const z of zonesOf_("ASIS")) {
     let geom;
     try { geom = JSON.parse(z["경계"]); } catch (e) { continue; }
     if (!geom || geom.type !== "MultiPolygon") continue;
