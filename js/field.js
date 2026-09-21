@@ -27,6 +27,7 @@ const state = {
   places: [],            // 좌표와 매핑되는 진행상태가 있는 행만
   byId: {},
   zones: [],
+  blogRank: [],          // 블로그 노출 목록. 목록 화면에서만 쓴다
   map: null,
   overlays: {},          // place_id → { overlay, el }
   markersVisible: false,
@@ -45,7 +46,7 @@ const Backend = {
   async mapData() {
     if (fixtureMode) {
       const body = await (await fetch(new URLSearchParams(location.search).get("fixture"))).json();
-      return { fetchedAt: body.fetchedAt, data: { zones: body.data.zones, places: body.data.places } };
+      return { fetchedAt: body.fetchedAt, data: { zones: body.data.zones, places: body.data.places, blogRank: body.data.blogRank || [] } };
     }
     const body = await Api.call("mapData");
     return { fetchedAt: body.fetchedAt, data: body.data };
@@ -77,6 +78,7 @@ async function devReply(value) {
 /* ---------------- 데이터 ---------------- */
 
 function applyData(data) {
+  state.blogRank = data.blogRank || [];
   state.zones = data.zones.map(z => ({ ...z, geometry: parseBoundary(z["경계"]) }));
   const withCoord = data.places.filter(p => isNum(p.lat) && isNum(p.lng));
   const nameCount = countBy(withCoord, "상호명");
@@ -132,7 +134,7 @@ function saveMapCache(fetchedAt) {
     const { displayName, ...rest } = p;
     return { ...rest, ...(state.confirmed[p.place_id] || {}) };
   });
-  Store.set(MAP_CACHE_KEY, JSON.stringify({ fetchedAt, data: { zones: state.zones.map(({ geometry, ...z }) => z), places } }));
+  Store.set(MAP_CACHE_KEY, JSON.stringify({ fetchedAt, data: { zones: state.zones.map(({ geometry, ...z }) => z), places, blogRank: state.blogRank } }));
 }
 
 /* ---------------- 상단 카운트 ---------------- */
@@ -758,6 +760,24 @@ function focusPlace(placeId) {
   openSheet(placeId);
 }
 
+/* ---------------- 블로그 노출 목록 ---------------- */
+
+// 지도와 연결하지 않는 읽기 전용 목록이다. 시트 "블로그 노출" 탭을 그대로 보여준다
+function openList() {
+  const rows = state.blogRank;
+  $("listBody").innerHTML = rows.length
+    ? rows.map(r => `<li class="li-item">
+        <span class="li-rank">${esc(r["순위"])}</span>
+        <span class="li-name">${esc(r["상호명"])}</span>
+        <span class="li-num">${esc(r["보정노출"])}</span>
+        <span class="li-addr">${esc(r["주소"] || "")}</span>
+        <span class="li-meta">${esc(r["채택"] || "")}${r["광고글"] ? ` / 광고 ${esc(r["광고글"])}` : ""}${r["최근글"] ? ` / 최근 ${esc(r["최근글"])}` : ""}</span>
+      </li>`).join("")
+    : `<li class="r-empty">목록이 비어 있습니다. 시트 "블로그 노출" 탭을 확인하세요</li>`;
+  $("listCount").textContent = rows.length ? `${rows.length}곳` : "";
+  $("listModal").hidden = false;
+}
+
 /* ---------------- 설정, 알림, 시작 ---------------- */
 
 function openSettings(message) {
@@ -786,6 +806,8 @@ async function start() {
     location.reload();
   };
   $("locBtn").onclick = onLocButton;
+  $("openList").onclick = openList;
+  $("closeList").onclick = () => ($("listModal").hidden = true);
   initSearch();
   // 앱을 백그라운드로 보내면 위치 추적을 멈춘다. 돌아오면 다시 켠다
   document.addEventListener("visibilitychange", () => {

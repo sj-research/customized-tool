@@ -16,10 +16,10 @@
  *   savePlan       routing_plans 저장. { plan: { plan_id?, date, zones[], order[], actualOrder[], memo } }
  *   structure      녹음 원문을 Claude로 구조화. 저장하지 않는다. { place_id, text }
  *   saveVisit      방문 저장. visits 1행, observations 여러 행, places 진행상태 갱신. { visit: {...} }
- *   mapData        현장 지도용 읽기. zones, places만. { }
+ *   mapData        현장 지도용 읽기. zones, places와 블로그 노출 목록. { }
  *   setStatus      places 진행상태 변경. { place_id, status, reason?, time?, manage? }
  *   addPlace       places에 새 행. 임의 핀 { name, lat, lng }, 검색 결과 { name, lat, lng, kakao: { id, category, address, url } }, 비고 지정 note?
- *   saveSurvey     "전수 조사" 탭에 표를 쓴다. 이미 내용이 있으면 overwrite: true일 때만 덮어쓴다. { headers[], rows[][], overwrite? }
+ *   saveSurvey     탭에 표를 쓴다. 기본 탭은 "전수 조사". 이미 내용이 있으면 overwrite: true일 때만 덮어쓴다. { headers[], rows[][], tab?, overwrite? }
  *   addDictionary  사전 탭에 행 추가. 같은 인식결과가 있으면 건너뛴다. { items: [{ 구분, 용어 또는 인식결과, 의미 또는 교정, 상태, 비고 }] }
  *   setBees        BEES 필수 방문 업장 일괄 반영. 있으면 BEES 체크만, 없으면 새 행. { items: [{ name, lat, lng, address?, url?, kakao? }] }
  *
@@ -30,7 +30,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.10";
+const API_VERSION = "0.11";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -82,7 +82,7 @@ function doPost(e) {
         return json_(saveVisit_(req.visit));
       case "mapData":
         return json_({ ok: true, version: API_VERSION, fetchedAt: formatDate_(new Date(), true),
-                       data: { zones: readSheet_("zones"), places: readSheet_("places") } });
+                       data: { zones: readSheet_("zones"), places: readSheet_("places"), blogRank: blogRank_() } });
       case "setStatus":
         return json_(withLock_(() => setStatus_(req)));
       case "addPlace":
@@ -770,6 +770,12 @@ function addPlace_(req) {
  * 기존 행은 BEES만 체크하고 다른 칸은 건드리지 않는다. 없으면 진행상태 미방문으로 새 행을 만든다
  */
 const SURVEY_TAB = "전수 조사";
+const BLOG_RANK_TAB = "블로그 노출";
+
+/** 앱 목록 화면에 쓰는 블로그 노출 표. 탭이 없으면 빈 배열 */
+function blogRank_() {
+  return SpreadsheetApp.getActive().getSheetByName(BLOG_RANK_TAB) ? readSheet_(BLOG_RANK_TAB) : [];
+}
 
 /** 현장 녹음을 정리한 표를 "전수 조사" 탭에 쓴다. 손으로 고친 내용을 실수로 지우지 않게, 이미 있으면 overwrite가 있어야 덮어쓴다 */
 function saveSurvey_(req) {
@@ -777,12 +783,14 @@ function saveSurvey_(req) {
   const rows = Array.isArray(req.rows) ? req.rows : [];
   if (!headers.length || headers.length > 40 || headers.some(h => !h)) throw new InputError("headers가 올바르지 않습니다");
   if (rows.length > 3000 || rows.some(r => !Array.isArray(r) || r.length !== headers.length)) throw new InputError("rows는 headers와 칸 수가 같은 배열이어야 합니다");
+  const tab = String(req.tab || SURVEY_TAB).trim().slice(0, 40);
+  if (!tab) throw new InputError("탭 이름이 올바르지 않습니다");
   const ss = SpreadsheetApp.getActive();
-  let sheet = ss.getSheetByName(SURVEY_TAB);
+  let sheet = ss.getSheetByName(tab);
   if (sheet && sheet.getLastRow() > 1 && req.overwrite !== true) {
-    throw new InputError(`${SURVEY_TAB} 탭에 이미 ${sheet.getLastRow() - 1}행이 있습니다. 덮어쓰려면 overwrite를 켜세요`);
+    throw new InputError(`${tab} 탭에 이미 ${sheet.getLastRow() - 1}행이 있습니다. 덮어쓰려면 overwrite를 켜세요`);
   }
-  if (!sheet) sheet = ss.insertSheet(SURVEY_TAB);
+  if (!sheet) sheet = ss.insertSheet(tab);
   sheet.clearContents();
   if (sheet.getMaxColumns() < headers.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), headers.length - sheet.getMaxColumns());
   if (sheet.getMaxRows() < rows.length + 1) sheet.insertRowsAfter(sheet.getMaxRows(), rows.length + 1 - sheet.getMaxRows());
@@ -792,7 +800,7 @@ function saveSurvey_(req) {
   const ref = ss.getSheetByName("places").getRange(1, 1);
   sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold").setFontColor(ref.getFontColor()).setBackground(ref.getBackground());
   sheet.setFrozenRows(1);
-  return { ok: true, tab: SURVEY_TAB, rows: rows.length };
+  return { ok: true, tab: tab, rows: rows.length };
 }
 
 const DICTIONARY_FIELDS = ["구분", "용어 또는 인식결과", "의미 또는 교정", "상태", "비고"];
