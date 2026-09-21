@@ -17,6 +17,7 @@ const SHEET_TO_APP = { "미방문": "미조사", "관측완료": "완료", "상�
 const APP_TO_SHEET = { "미조사": "미방문", "완료": "관측완료", "재방문": "재방문필요", "제외": "제외" };
 const STATUS_ORDER = ["미조사", "완료", "재방문", "제외"];
 const STATUS_COLOR = { "미조사": "#e8590c", "완료": "#2b8a3e", "재방문": "#c2255c", "제외": "#868e96" };
+const BEES_COLOR = "#f1c40f";   // Bees 인덱스 색 (9월 21일 결정)
 const REVISIT_REASONS = ["키맨 부재", "브레이크 타임", "영업 전", "기타"];
 
 const $ = id => document.getElementById(id);
@@ -102,7 +103,7 @@ function decorate(p, nameCount) {
   return {
     ...p,
     lat: Number(p.lat), lng: Number(p.lng),
-    bees: isChecked(p["BEES"]),   // BEES 필수 방문 업장. 진행상태는 다른 업장과 같게 관리한다
+    bees: isChecked(p["BEES"]),   // Bees 필수 방문 업장. 진행상태는 다른 업장과 같게 관리한다
     displayName: nameCount && nameCount[p["상호명"]] > 1 ? `${p["상호명"]} (${p["주소"] || p.zone_id || ""})` : p["상호명"],
   };
 }
@@ -143,12 +144,12 @@ function renderCounts() {
     + beesCount();
 }
 
-// BEES는 네 상태 숫자에도 함께 세고, 완료한 곳 수를 따로 보여준다
+// Bees는 네 상태 숫자에도 함께 세고, 완료한 곳 수를 따로 보여준다
 function beesCount() {
   const bees = state.places.filter(p => p.bees);
   if (!bees.length) return "";
   const done = bees.filter(p => appStatus(p) === "완료").length;
-  return `<span class="cnt bees"><i></i>BEES <b>${done}/${bees.length}</b></span>`;
+  return `<span class="cnt bees"><i></i>Bees <b>${done}/${bees.length}</b></span>`;
 }
 
 /* ---------------- 지도 ---------------- */
@@ -198,12 +199,12 @@ function paintMarker(placeId) {
   const o = state.overlays[placeId];
   const p = state.byId[placeId];
   if (!o || !p) return;
-  // BEES는 점선 테두리. 방문 전에는 미조사 색 대신 흰색으로 둔다
+  // Bees는 점선 테두리. 방문 전에는 미조사 색 대신 Bees 색(노랑)으로 둔다
   o.el.classList.toggle("bees", p.bees);
-  o.el.style.background = p.bees && appStatus(p) === "미조사" ? "#fff" : STATUS_COLOR[appStatus(p)];
+  o.el.style.background = p.bees && appStatus(p) === "미조사" ? BEES_COLOR : STATUS_COLOR[appStatus(p)];
   o.el.classList.toggle("selected", state.selected === placeId);
   o.el.classList.toggle("pending", !!state.pending[placeId]);
-  o.el.setAttribute("aria-label", `${p.bees ? "BEES " : ""}${p.displayName} ${appStatus(p)}`);
+  o.el.setAttribute("aria-label", `${p.bees ? "Bees " : ""}${p.displayName} ${appStatus(p)}`);
 }
 
 function updateMarkerVisibility() {
@@ -244,7 +245,7 @@ function renderSheet(mode) {
 
   $("sheet").innerHTML = `
     <div class="s-head">
-      <div><h3>${p.bees ? `<span class="bees-tag">BEES</span>` : ""}${esc(p.displayName)}</h3>${kind ? `<p class="muted">${esc(kind)}</p>` : ""}</div>
+      <div><h3>${p.bees ? `<span class="bees-tag">Bees</span>` : ""}${esc(p.displayName)}</h3>${kind ? `<p class="muted">${esc(kind)}</p>` : ""}</div>
       <button class="x" id="closeSheet" aria-label="닫기">✕</button>
     </div>
     ${revisitLine}${manageLine}
