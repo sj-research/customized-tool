@@ -22,6 +22,7 @@
  *   saveSurvey     탭에 표를 쓴다. 기본 탭은 "전수 조사". 이미 내용이 있으면 overwrite: true일 때만 덮어쓴다. { headers[], rows[][], tab?, overwrite? }
  *   addDictionary  사전 탭에 행 추가. 같은 인식결과가 있으면 건너뛴다. { items: [{ 구분, 용어 또는 인식결과, 의미 또는 교정, 상태, 비고 }] }
  *   setZonesTobe   zones 탭 1열 "구분"(ASIS, TOBE)을 만들고 TOBE 구역 행을 ASIS 행 아래에 새로 쓴다. { zones: [{ zone_id, 구역명, 경계, ... }] }
+ *   setPlaceTags   places "TOBE 태그" 열을 목록대로 맞춘다. 목록에 없는 업장의 태그는 지운다. { items: [{ place_id, tag }] }
  *   setBees        BEES 필수 방문 업장 일괄 반영. 있으면 BEES 체크만, 없으면 새 행. { items: [{ name, lat, lng, address?, url?, kakao? }] }
  *
  * 스크립트 속성
@@ -31,7 +32,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.12";
+const API_VERSION = "0.13";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -93,6 +94,8 @@ function doPost(e) {
         return json_(withLock_(() => setBees_(req)));
       case "setZonesTobe":
         return json_(withLock_(() => setZonesTobe_(req)));
+      case "setPlaceTags":
+        return json_(withLock_(() => setPlaceTags_(req)));
       case "saveSurvey":
         return json_(withLock_(() => saveSurvey_(req)));
       case "addDictionary":
@@ -834,6 +837,30 @@ function setZonesTobe_(req) {
     writeRow_(sheet, start + i, values, null);
   });
   return { ok: true, asisRows: start - 2, tobeRows: zones.length };
+}
+
+// 신설동 S3, S4처럼 폴리곤 없이 업장으로 정의한 TOBE 구역 표시
+const PLACE_TAG_HEADER = "TOBE 태그";
+const PLACE_TAGS = ["감성 맛집", "오래된 로컬"];
+
+function setPlaceTags_(req) {
+  const items = Array.isArray(req.items) ? req.items : [];
+  if (items.length > 500) throw new InputError("items는 500건 이하여야 합니다");
+  const want = {};
+  items.forEach(it => {
+    const id = String(it.place_id || "").trim();
+    if (!id || !PLACE_TAGS.includes(it.tag)) throw new InputError(`태그가 올바르지 않습니다: ${id} ${it.tag}`);
+    want[id] = it.tag;
+  });
+  const sheet = SpreadsheetApp.getActive().getSheetByName("places");
+  const col = addHeaderColumn_(sheet, PLACE_TAG_HEADER).col;
+  const last = sheet.getLastRow();
+  const ids = sheet.getRange(2, 1, Math.max(last - 1, 1), 1).getValues().map(r => String(r[0]).trim());
+  const unknown = Object.keys(want).filter(id => !ids.includes(id));
+  if (unknown.length) throw new InputError(`places에 없는 place_id: ${unknown.join(", ")}`);
+  // 한 번에 열 전체를 쓴다. 목록에 없는 업장은 빈칸
+  sheet.getRange(2, col, ids.length, 1).setValues(ids.map(id => [want[id] || ""]));
+  return { ok: true, tagged: Object.keys(want).length };
 }
 
 const SURVEY_TAB = "전수 조사";

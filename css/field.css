@@ -150,3 +150,12 @@ h3 { margin: 0; font-size: 18px; }
 .li-name { font-weight: 600; }
 .li-num { font-weight: 700; color: #1f3a5f; }
 .li-addr, .li-meta { grid-column: 2 / -1; font-size: 12px; color: #888; }
+
+/* 신설동 S3, S4: 상태 점 바깥에 회색 테두리 (세모는 감성 맛집, 네모는 오래된 로컬) */
+.mk.t-tri, .mk.t-sq { position: relative; overflow: visible; }
+.mk.t-sq::after { content: ""; position: absolute; inset: -7px; border: 2.5px solid #8a8f98; border-radius: 2px; pointer-events: none; }
+.mk.t-tri::after {
+  content: ""; position: absolute; left: -70%; right: -70%; top: -95%; bottom: -45%; pointer-events: none;
+  background: no-repeat center / 100% 100%
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpolygon points='50,4 97,96 3,96' fill='none' stroke='%238a8f98' stroke-width='7' stroke-linejoin='round'/%3E%3C/svg%3E");
+}

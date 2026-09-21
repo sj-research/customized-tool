@@ -205,6 +205,9 @@ function paintMarker(placeId) {
   if (!o || !p) return;
   // Bees는 점선 테두리. 방문 전에는 미조사 색 대신 Bees 색(노랑)으로 둔다
   o.el.classList.toggle("bees", p.bees);
+  // 신설동 S3 감성 맛집은 회색 세모, S4 오래된 로컬 맛집은 회색 네모 테두리 (폴리곤 없이 업장으로 정의한 구역)
+  o.el.classList.toggle("t-tri", p["TOBE 태그"] === "감성 맛집");
+  o.el.classList.toggle("t-sq", p["TOBE 태그"] === "오래된 로컬");
   o.el.style.background = p.bees && appStatus(p) === "미조사" ? BEES_COLOR : STATUS_COLOR[appStatus(p)];
   o.el.classList.toggle("selected", state.selected === placeId);
   o.el.classList.toggle("pending", !!state.pending[placeId]);
