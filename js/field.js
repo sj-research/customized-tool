@@ -156,13 +156,14 @@ function renderCounts() {
   $("counts").querySelectorAll("[data-list]").forEach(el => el.onclick = () => openIndexList(el.dataset.list, el.dataset.bees === "1"));
 }
 
-// Bees는 위 상태 숫자에도 함께 세고, 미조사와 관리 수를 둘째 줄에 따로 보여준다
+// Bees는 위 상태 숫자에도 함께 세고, 미조사와 관리와 재방문 수를 둘째 줄에 따로 보여준다
 function beesCount() {
   const bees = state.places.filter(p => p.bees);
   if (!bees.length) return "";
   const n = s => bees.filter(p => appStatus(p) === s).length;
   const chip = (s, color, label) => `<span class="cnt bees tap" data-list="${s}" data-bees="1"><i style="background:${color}"></i>${label} <b>${n(s)}</b></span>`;
-  return `<span class="bees-row">${chip("미조사", BEES_COLOR, "Bees 미조사")}${chip("관리", STATUS_COLOR["관리"], "Bees 관리")}</span>`;
+  return `<span class="bees-row">${chip("미조사", BEES_COLOR, "Bees 미조사")}${chip("관리", STATUS_COLOR["관리"], "Bees 관리")}` +
+    `${chip("재방문", STATUS_COLOR["재방문"], "Bees 재방문")}</span>`;
 }
 
 /* ---------------- 지도 ---------------- */
