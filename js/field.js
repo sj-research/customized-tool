@@ -20,6 +20,7 @@ const STATUS_BUTTONS = ["미조사", "완료", "재방문", "제외"];          
 const STATUS_COLOR = { "미조사": "#e8590c", "완료": "#2b8a3e", "관리": "#1864ab", "재방문": "#c2255c", "제외": "#868e96" };
 const BEES_COLOR = "#f1c40f";   // Bees 인덱스 색 (9월 21일 결정)
 const REVISIT_REASONS = ["키맨 부재", "브레이크 타임", "영업 전", "기타"];
+const LIST_INDEXES = ["완료", "관리", "재방문"];   // 카운트를 눌러 목록을 여는 index. 미조사와 제외는 목록을 열지 않는다
 
 const $ = id => document.getElementById(id);
 const fixtureMode = !!new URLSearchParams(location.search).get("fixture");
@@ -148,9 +149,11 @@ function saveMapCache(fetchedAt) {
 
 function renderCounts() {
   const counts = countBy(state.places.map(p => ({ s: appStatus(p) })), "s");
-  $("counts").innerHTML = STATUS_ORDER.map(s =>
-    `<span class="cnt"><i style="background:${STATUS_COLOR[s]}"></i>${s} <b>${counts[s] || 0}</b></span>`).join("")
-    + beesCount();
+  $("counts").innerHTML = STATUS_ORDER.map(s => {
+    const on = LIST_INDEXES.includes(s);
+    return `<span class="cnt${on ? " tap" : ""}"${on ? ` data-list="${s}"` : ""}><i style="background:${STATUS_COLOR[s]}"></i>${s} <b>${counts[s] || 0}</b></span>`;
+  }).join("") + beesCount();
+  $("counts").querySelectorAll("[data-list]").forEach(el => el.onclick = () => openIndexList(el.dataset.list, el.dataset.bees === "1"));
 }
 
 // Bees는 위 상태 숫자에도 함께 세고, 미조사와 관리 수를 둘째 줄에 따로 보여준다
@@ -158,7 +161,7 @@ function beesCount() {
   const bees = state.places.filter(p => p.bees);
   if (!bees.length) return "";
   const n = s => bees.filter(p => appStatus(p) === s).length;
-  const chip = (s, color, label) => `<span class="cnt bees"><i style="background:${color}"></i>${label} <b>${n(s)}</b></span>`;
+  const chip = (s, color, label) => `<span class="cnt bees tap" data-list="${s}" data-bees="1"><i style="background:${color}"></i>${label} <b>${n(s)}</b></span>`;
   return `<span class="bees-row">${chip("미조사", BEES_COLOR, "Bees 미조사")}${chip("관리", STATUS_COLOR["관리"], "Bees 관리")}</span>`;
 }
 
@@ -776,8 +779,37 @@ function focusPlace(placeId) {
 
 /* ---------------- 블로그 노출 목록 ---------------- */
 
+// 카운트를 누르면 그 index에 드는 업장만 목록으로 보여준다. 누르면 지도에서 그 업장으로 간다
+function openIndexList(key, beesOnly) {
+  const rows = state.places
+    .filter(p => appStatus(p) === key && (!beesOnly || p.bees))
+    .map(p => ({ ...p, zone: zoneName(p) }))
+    .sort((a, b) => String(a.zone).localeCompare(String(b.zone)) || String(a.displayName).localeCompare(String(b.displayName)));
+  $("listTitle").textContent = `${beesOnly ? "Bees " : ""}${key}`;
+  $("listCount").textContent = `${rows.length}곳`;
+  $("listBody").innerHTML = rows.length
+    ? rows.map(p => `<li><button class="li-item li-place" data-place="${esc(p.place_id)}">
+        <span class="li-rank"><i class="li-dot" style="background:${p.bees && appStatus(p) === "미조사" ? BEES_COLOR : STATUS_COLOR[appStatus(p)]}"></i></span>
+        <span class="li-name">${esc(p.displayName)}</span>
+        <span class="li-addr">${esc(p.zone ? p.zone + " / " : "")}${esc(p["주소"] || "")}</span>
+      </li>`).join("")
+    : `<li class="r-empty">해당하는 업장이 없습니다</li>`;
+  $("listBody").querySelectorAll("[data-place]").forEach(b => b.onclick = () => {
+    $("listModal").hidden = true;
+    focusPlace(b.dataset.place);
+  });
+  $("listModal").hidden = false;
+}
+
+// 업장이 속한 구역 이름. 시트 zones(TOBE) 경계로 찾는다
+function zoneName(p) {
+  const z = state.zones.find(z => z.geometry && z.geometry.coordinates.some(poly => pointInRing(+p.lng, +p.lat, poly[0])));
+  return z ? String(z["구역명"] || z.zone_id) : "";
+}
+
 // 지도와 연결하지 않는 읽기 전용 목록이다. 시트 "블로그 노출" 탭을 그대로 보여준다
 function openList() {
+  $("listTitle").textContent = "블로그 노출";
   const rows = state.blogRank;
   $("listBody").innerHTML = rows.length
     ? rows.map(r => `<li class="li-item">

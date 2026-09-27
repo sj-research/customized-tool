@@ -160,3 +160,10 @@ h3 { margin: 0; font-size: 18px; }
   background: no-repeat center / 100% 100%
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpolygon points='50,4 97,96 3,96' fill='none' stroke='%238a8f98' stroke-width='7' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
+
+/* 카운트를 눌러 여는 index 목록 */
+.cnt.tap { cursor: pointer; }
+.cnt.tap b { text-decoration: underline; text-underline-offset: 2px; }
+.li-place { display: grid; grid-template-columns: 22px 1fr; gap: 2px 8px; width: 100%; padding: 10px 2px; border: 0; border-bottom: 1px solid #eee; background: none; font: inherit; text-align: left; }
+.li-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 1px solid #fff; box-shadow: 0 0 1px rgba(0,0,0,.5); }
+.li-place .li-addr { grid-column: 2; }
