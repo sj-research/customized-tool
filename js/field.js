@@ -15,8 +15,9 @@ const TRACK_KEY = "cet.track.v1";
 const SHEET_TO_APP = { "미방문": "미조사", "관측완료": "완료", "상담완료": "완료", "재방문필요": "재방문", "제외": "제외" };
 // 앱 버튼 → 시트에 쓰는 값. 완료는 관측완료를 쓴다 (상담완료는 서버가 덮어쓰지 않는다)
 const APP_TO_SHEET = { "미조사": "미방문", "완료": "관측완료", "재방문": "재방문필요", "제외": "제외" };
-const STATUS_ORDER = ["미조사", "완료", "재방문", "제외"];
-const STATUS_COLOR = { "미조사": "#e8590c", "완료": "#2b8a3e", "재방문": "#c2255c", "제외": "#868e96" };
+const STATUS_ORDER = ["미조사", "완료", "관리", "재방문", "제외"];   // 화면 표시용. 관리는 완료 중 관리 체크한 곳
+const STATUS_BUTTONS = ["미조사", "완료", "재방문", "제외"];          // 하단 시트 버튼. 관리는 완료 저장 때 체크로 정한다
+const STATUS_COLOR = { "미조사": "#e8590c", "완료": "#2b8a3e", "관리": "#1864ab", "재방문": "#c2255c", "제외": "#868e96" };
 const BEES_COLOR = "#f1c40f";   // Bees 인덱스 색 (9월 21일 결정)
 const REVISIT_REASONS = ["키맨 부재", "브레이크 타임", "영업 전", "기타"];
 
@@ -112,7 +113,11 @@ function decorate(p, nameCount) {
 
 const pick = p => ({ "진행상태": p["진행상태"], "재방문사유": p["재방문사유"] || "", "재방문예정시각": p["재방문예정시각"] || "", "관리": isChecked(p["관리"]) });
 const isChecked = v => v === true || String(v).toUpperCase() === "TRUE";
-const appStatus = p => SHEET_TO_APP[p["진행상태"]];
+// 완료 중 관리 체크한 곳은 관리로 센다. 체크를 끄면 다시 완료가 된다 (시트 관리 열만 본다)
+const appStatus = p => {
+  const base = SHEET_TO_APP[p["진행상태"]];
+  return base === "완료" && isChecked(p["관리"]) ? "관리" : base;
+};
 const isNum = v => v !== null && v !== "" && !isNaN(Number(v));
 
 function parseBoundary(value) {
@@ -146,12 +151,13 @@ function renderCounts() {
     + beesCount();
 }
 
-// Bees는 네 상태 숫자에도 함께 세고, 완료한 곳 수를 따로 보여준다
+// Bees는 위 상태 숫자에도 함께 세고, 미조사와 관리 수를 둘째 줄에 따로 보여준다
 function beesCount() {
   const bees = state.places.filter(p => p.bees);
   if (!bees.length) return "";
-  const done = bees.filter(p => appStatus(p) === "완료").length;
-  return `<span class="cnt bees"><i></i>Bees <b>${done}/${bees.length}</b></span>`;
+  const n = s => bees.filter(p => appStatus(p) === s).length;
+  const chip = (s, color, label) => `<span class="cnt bees"><i style="background:${color}"></i>${label} <b>${n(s)}</b></span>`;
+  return `<span class="bees-row">${chip("미조사", BEES_COLOR, "Bees 미조사")}${chip("관리", STATUS_COLOR["관리"], "Bees 관리")}</span>`;
 }
 
 /* ---------------- 지도 ---------------- */
@@ -208,7 +214,7 @@ function paintMarker(placeId) {
   // 신설동 S3 감성 맛집은 회색 세모, S4 오래된 로컬 맛집은 회색 네모 테두리 (폴리곤 없이 업장으로 정의한 구역)
   o.el.classList.toggle("t-tri", p["TOBE 태그"] === "감성 맛집");
   o.el.classList.toggle("t-sq", p["TOBE 태그"] === "오래된 로컬");
-  o.el.style.background = p.bees && appStatus(p) === "미조사" ? BEES_COLOR : STATUS_COLOR[appStatus(p)];
+  o.el.style.background = p.bees && appStatus(p) === "미조사" ? BEES_COLOR : STATUS_COLOR[appStatus(p)];   // 방문 전 Bees만 노란색, 관리는 파란색
   o.el.classList.toggle("selected", state.selected === placeId);
   o.el.classList.toggle("pending", !!state.pending[placeId]);
   o.el.setAttribute("aria-label", `${p.bees ? "Bees " : ""}${p.displayName} ${appStatus(p)}`);
@@ -248,7 +254,7 @@ function renderSheet(mode) {
   const kind = p["업태서술"] || String(p["카카오 업종"] || "").split(">").slice(1).map(s => s.trim()).filter(Boolean).join(" > ");
   const revisitLine = current === "재방문"
     ? `<p class="revisit">재방문 사유: ${esc(p["재방문사유"] || "기록 없음")}${p["재방문예정시각"] ? ` / 예정 ${esc(p["재방문예정시각"])}` : ""}</p>` : "";
-  const manageLine = current === "완료" && isChecked(p["관리"]) ? `<p class="manage">관리 업장</p>` : "";
+  const manageLine = current === "관리" ? `<p class="manage">관리 업장</p>` : "";
 
   $("sheet").innerHTML = `
     <div class="s-head">
@@ -257,8 +263,8 @@ function renderSheet(mode) {
     </div>
     ${revisitLine}${manageLine}
     ${mode === "reason" ? reasonPicker() : mode === "complete" ? completePicker(isChecked(p["관리"])) : `
-      <div class="st-btns">${STATUS_ORDER.map(s =>
-        `<button class="st ${s === current ? "on" : ""}" data-st="${s}" style="--c:${STATUS_COLOR[s]}">${s}</button>`).join("")}</div>
+      <div class="st-btns">${STATUS_BUTTONS.map(s =>
+        `<button class="st ${s === current || (s === "완료" && current === "관리") ? "on" : ""}" data-st="${s}" style="--c:${STATUS_COLOR[s]}">${s}</button>`).join("")}</div>
       <p class="muted small" id="saving">${state.pending[p.place_id] ? "저장 중" : ""}</p>`}
     ${p["지도링크"] ? `<a class="kakao" href="${esc(p["지도링크"])}" target="_blank" rel="noopener">카카오맵에서 열기</a>` : ""}`;
   $("sheet").hidden = false;
