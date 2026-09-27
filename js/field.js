@@ -53,7 +53,9 @@ const Backend = {
     return { fetchedAt: body.fetchedAt, data: body.data };
   },
   async setStatus(placeId, status, reason, time, manage) {
-    if (fixtureMode) return devReply({ ok: true, place_id: placeId, "진행상태": status, "재방문사유": reason || "", "재방문예정시각": time || "", "관리": status === "관측완료" && manage === true });
+    // 개발용 응답. 관리 값을 보내지 않은 요청은 시트처럼 관리 칸을 그대로 둔다
+    if (fixtureMode) return devReply({ ok: true, place_id: placeId, "진행상태": status, "재방문사유": reason || "", "재방문예정시각": time || "",
+                                       ...(manage === undefined ? {} : { "관리": manage === true }) });
     return Api.call("setStatus", { place_id: placeId, status, reason, time, manage });
   },
   async addPlace(name, lat, lng, kakao) {
@@ -113,10 +115,10 @@ function decorate(p, nameCount) {
 
 const pick = p => ({ "진행상태": p["진행상태"], "재방문사유": p["재방문사유"] || "", "재방문예정시각": p["재방문예정시각"] || "", "관리": isChecked(p["관리"]) });
 const isChecked = v => v === true || String(v).toUpperCase() === "TRUE";
-// 완료 중 관리 체크한 곳은 관리로 센다. 체크를 끄면 다시 완료가 된다 (시트 관리 열만 본다)
+// 관리 체크는 미리 지정해 두는 표시다. 체크가 켜져 있으면 진행상태와 상관없이 관리로 센다 (제외는 제외로 둔다)
 const appStatus = p => {
   const base = SHEET_TO_APP[p["진행상태"]];
-  return base === "완료" && isChecked(p["관리"]) ? "관리" : base;
+  return isChecked(p["관리"]) && base !== "제외" ? "관리" : base;
 };
 const isNum = v => v !== null && v !== "" && !isNaN(Number(v));
 
@@ -254,7 +256,7 @@ function renderSheet(mode) {
   const kind = p["업태서술"] || String(p["카카오 업종"] || "").split(">").slice(1).map(s => s.trim()).filter(Boolean).join(" > ");
   const revisitLine = current === "재방문"
     ? `<p class="revisit">재방문 사유: ${esc(p["재방문사유"] || "기록 없음")}${p["재방문예정시각"] ? ` / 예정 ${esc(p["재방문예정시각"])}` : ""}</p>` : "";
-  const manageLine = current === "관리" ? `<p class="manage">관리 업장</p>` : "";
+  const manageLine = isChecked(p["관리"]) ? `<p class="manage">관리 업장</p>` : "";
 
   $("sheet").innerHTML = `
     <div class="s-head">
@@ -264,7 +266,7 @@ function renderSheet(mode) {
     ${revisitLine}${manageLine}
     ${mode === "reason" ? reasonPicker() : mode === "complete" ? completePicker(isChecked(p["관리"])) : `
       <div class="st-btns">${STATUS_BUTTONS.map(s =>
-        `<button class="st ${s === current || (s === "완료" && current === "관리") ? "on" : ""}" data-st="${s}" style="--c:${STATUS_COLOR[s]}">${s}</button>`).join("")}</div>
+        `<button class="st ${s === current || (s === "완료" && current === "관리" && SHEET_TO_APP[p["진행상태"]] === "완료") ? "on" : ""}" data-st="${s}" style="--c:${STATUS_COLOR[s]}">${s}</button>`).join("")}</div>
       <p class="muted small" id="saving">${state.pending[p.place_id] ? "저장 중" : ""}</p>`}
     ${p["지도링크"] ? `<a class="kakao" href="${esc(p["지도링크"])}" target="_blank" rel="noopener">카카오맵에서 열기</a>` : ""}`;
   $("sheet").hidden = false;
@@ -320,9 +322,9 @@ function reasonPicker() {
 function changeStatus(placeId, appNext, reason, time, manage) {
   const p = state.byId[placeId];
   const revisit = appNext === "재방문";
-  // 관리 체크는 완료일 때만 남는다. 다른 상태로 바꾸면 해제된다
+  // 관리 체크는 완료 저장 화면에서만 바꾼다. 다른 상태로 바꿔도 기존 체크는 유지한다
   const local = { "진행상태": APP_TO_SHEET[appNext], "재방문사유": revisit ? reason : "", "재방문예정시각": revisit ? (time || "") : "",
-                  "관리": appNext === "완료" && manage === true };
+                  "관리": appNext === "완료" ? manage === true : isChecked(p["관리"]) };
 
   // 화면을 먼저 바꾼다
   state.localValues = state.localValues || {};
@@ -336,7 +338,7 @@ function changeStatus(placeId, appNext, reason, time, manage) {
   // 업장마다 요청을 하나씩만 보낸다. 응답을 기다리는 동안 다시 누르면 마지막 값만 이어서 보낸다.
   // 요청이 동시에 나가면 도착 순서가 뒤바뀌어 시트에 이전 값이 남을 수 있기 때문이다
   state.desired = state.desired || {};
-  state.desired[placeId] = local;
+  state.desired[placeId] = { ...local, "관리변경": appNext === "완료" };
   sendStatus(placeId);
 }
 
@@ -350,8 +352,9 @@ async function sendStatus(placeId) {
     delete state.desired[placeId];
     try {
       const resp = await Backend.setStatus(placeId, job["진행상태"], job["재방문사유"] || undefined, job["재방문예정시각"] || undefined,
-        job["진행상태"] === "관측완료" ? job["관리"] : undefined);
-      state.confirmed[placeId] = { "진행상태": resp["진행상태"], "재방문사유": resp["재방문사유"] || "", "재방문예정시각": resp["재방문예정시각"] || "", "관리": resp["관리"] === true };
+        job["관리변경"] ? job["관리"] : undefined);
+      state.confirmed[placeId] = { "진행상태": resp["진행상태"], "재방문사유": resp["재방문사유"] || "", "재방문예정시각": resp["재방문예정시각"] || "",
+                                   "관리": "관리" in resp ? resp["관리"] === true : job["관리"] === true };
       failure = null;
     } catch (err) {
       failure = err;

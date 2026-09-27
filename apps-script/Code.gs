@@ -17,7 +17,8 @@
  *   structure      녹음 원문을 Claude로 구조화. 저장하지 않는다. { place_id, text }
  *   saveVisit      방문 저장. visits 1행, observations 여러 행, places 진행상태 갱신. { visit: {...} }
  *   mapData        현장 지도용 읽기. zones(TOBE가 있으면 TOBE만), places와 블로그 노출 목록. { }
- *   setStatus      places 진행상태 변경. { place_id, status, reason?, time?, manage? }
+ *   setStatus      places 진행상태 변경. { place_id, status, reason?, time?, manage? }. manage는 준 값만 바꾼다
+ *   setManage      places 관리 체크를 목록대로 켠다. 목록에 없는 업장은 끈다. { items: [place_id, ...] }
  *   addPlace       places에 새 행. 임의 핀 { name, lat, lng }, 검색 결과 { name, lat, lng, kakao: { id, category, address, url } }, 비고 지정 note?
  *   saveSurvey     탭에 표를 쓴다. 기본 탭은 "전수 조사". 이미 내용이 있으면 overwrite: true일 때만 덮어쓴다. { headers[], rows[][], tab?, overwrite? }
  *   addDictionary  사전 탭에 행 추가. 같은 인식결과가 있으면 건너뛴다. { items: [{ 구분, 용어 또는 인식결과, 의미 또는 교정, 상태, 비고 }] }
@@ -32,7 +33,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.13";
+const API_VERSION = "0.14";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -88,6 +89,8 @@ function doPost(e) {
                        data: { zones: mapZones_(), places: readSheet_("places"), blogRank: blogRank_() } });
       case "setStatus":
         return json_(withLock_(() => setStatus_(req)));
+      case "setManage":
+        return json_(withLock_(() => setManage_(req)));
       case "addPlace":
         return json_(withLock_(() => addPlace_(req)));
       case "setBees":
@@ -733,10 +736,9 @@ function setStatus_(req) {
   sheet.getRange(row, reasonCol).setValue(revisit ? req.reason : "");
   // 일반 서식이면 14:00은 시각, 12는 숫자로 바뀐다. 입력한 글자 그대로 남기려고 텍스트 서식으로 쓴다
   sheet.getRange(row, timeCol).setNumberFormat("@").setValue(time);
-  // 관리 체크는 완료일 때만 둔다. 완료가 아니게 되면 해제한다. 완료인데 값이 안 오면 기존 값을 유지한다
+  // 관리 체크는 미리 지정해 두는 표시라 진행상태를 바꿔도 유지한다. 값이 온 경우에만 바꾼다 (9월 27일 결정)
   const manageCell = sheet.getRange(row, manageCol);
-  if (req.status !== "관측완료") manageCell.setValue(false);
-  else if (typeof req.manage === "boolean") manageCell.setValue(req.manage);
+  if (typeof req.manage === "boolean") manageCell.setValue(req.manage);
   const manage = manageCell.getValue() === true;
   return { ok: true, place_id: placeId, "진행상태": next, "재방문사유": revisit ? req.reason : "", "재방문예정시각": time, "관리": manage };
 }
@@ -842,6 +844,22 @@ function setZonesTobe_(req) {
 // 신설동 S3, S4처럼 폴리곤 없이 업장으로 정의한 TOBE 구역 표시
 const PLACE_TAG_HEADER = "TOBE 태그";
 const PLACE_TAGS = ["감성 맛집", "오래된 로컬"];
+
+/** 관리 체크를 목록대로 맞춘다. 목록에 없는 업장은 끈다 */
+function setManage_(req) {
+  const items = Array.isArray(req.items) ? req.items : [];
+  if (items.length > 500) throw new InputError("items는 500건 이하여야 합니다");
+  const want = items.map(id => String(id || "").trim());
+  if (want.some(id => !id)) throw new InputError("place_id가 비어 있습니다");
+  ensurePlaceColumns_();
+  const sheet = SpreadsheetApp.getActive().getSheetByName("places");
+  const col = headerIndex_(sheet, "관리");
+  const ids = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 1), 1).getValues().map(r => String(r[0]).trim());
+  const unknown = want.filter(id => !ids.includes(id));
+  if (unknown.length) throw new InputError(`places에 없는 place_id: ${unknown.join(", ")}`);
+  sheet.getRange(2, col, ids.length, 1).setValues(ids.map(id => [want.includes(id)]));
+  return { ok: true, managed: want.length };
+}
 
 function setPlaceTags_(req) {
   const items = Array.isArray(req.items) ? req.items : [];
