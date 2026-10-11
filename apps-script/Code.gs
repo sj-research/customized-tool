@@ -33,7 +33,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.17";
+const API_VERSION = "0.18";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -865,6 +865,11 @@ const PLACE_TAGS = ["감성 맛집", "오래된 로컬"];
 /** 관리 체크를 목록대로 맞춘다. 목록에 없는 업장은 끈다 */
 function setManage_(req) {
   const items = Array.isArray(req.items) ? req.items : [];
+  // 이 함수는 관리 열 전체를 목록대로 다시 쓴다. 빈 목록을 보내면 체크가 모두 풀린다.
+  // 2026년 10월 11일에 실제로 그렇게 67곳이 풀려서 빈 목록을 막는다. 전부 끄려면 clearAll을 함께 보낸다
+  if (!items.length && req.clearAll !== true) {
+    throw new InputError("items가 비어 있습니다. 관리 체크를 모두 끄려면 clearAll을 true로 보내세요");
+  }
   if (items.length > 500) throw new InputError("items는 500건 이하여야 합니다");
   const want = items.map(id => String(id || "").trim());
   if (want.some(id => !id)) throw new InputError("place_id가 비어 있습니다");
