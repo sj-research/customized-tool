@@ -214,18 +214,22 @@ function openZoneStats(z) {
   const bees = rows.filter(p => p.bees).length;
   $("listTitle").textContent = `${z.zone_id ? z.zone_id + " " : ""}${name}`;
   $("listCount").textContent = `POC ${rows.length}곳`;
-  const chips = STATUS_ORDER.map(s =>
-    `<button class="zs-chip" data-zstat="${s}"><i style="background:${STATUS_COLOR[s]}"></i>${s} <b>${n(s)}</b></button>`).join("");
-  $("listBody").innerHTML =
-    `<li class="zs-wrap">${chips}${bees ? `<span class="zs-chip zs-flat"><i style="background:${BEES_COLOR}"></i>Bees <b>${bees}</b></span>` : ""}</li>` +
+  const chip = (key, color, count) =>
+    `<button class="zs-chip" data-zstat="${key}"><i style="background:${color}"></i>${key} <b>${count}</b></button>`;
+  // Bees도 다른 칩과 똑같이 눌러서 목록을 본다 (10월 11일. 하나만 안 눌리면 헷갈린다)
+  const chips = STATUS_ORDER.map(s => chip(s, STATUS_COLOR[s], n(s))).join("") +
+    (bees ? chip("Bees", BEES_COLOR, bees) : "");
+  $("listBody").innerHTML = `<li class="zs-wrap">${chips}</li>` +
     (rows.length ? "" : `<li class="r-empty">이 구역에 좌표가 있는 업장이 없습니다</li>`);
   $("listBody").querySelectorAll("[data-zstat]").forEach(b => b.onclick = () => openZoneList(z, b.dataset.zstat));
   $("listModal").hidden = false;
 }
 
 // 구역 요약에서 상태 하나를 누르면 그 업장 목록을 보여준다
+// key는 진행상태(미조사, 완료, 관리, 재방문, 제외) 또는 "Bees"
 function openZoneList(z, key) {
-  const rows = placesInZone(z).filter(p => appStatus(p) === key)
+  const match = key === "Bees" ? (p => p.bees) : (p => appStatus(p) === key);
+  const rows = placesInZone(z).filter(match)
     .sort((a, b) => String(a.displayName).localeCompare(String(b.displayName)));
   $("listTitle").textContent = `${String(z["구역명"] || z.zone_id || "")} / ${key}`;
   $("listCount").textContent = `${rows.length}곳`;
@@ -233,7 +237,7 @@ function openZoneList(z, key) {
     ? rows.map(p => `<li><button class="li-item li-place" data-place="${esc(p.place_id)}">
         <span class="li-rank"><i class="li-dot" style="background:${p.bees && appStatus(p) === "미조사" ? BEES_COLOR : STATUS_COLOR[appStatus(p)]}"></i></span>
         <span class="li-name">${esc(p.displayName)}</span>
-        <span class="li-addr">${esc(p["주소"] || "")}</span>
+        <span class="li-addr">${key === "Bees" ? esc(appStatus(p)) + " / " : ""}${esc(p["주소"] || "")}</span>
       </button></li>`).join("")
     : `<li class="r-empty">해당하는 업장이 없습니다</li>`;
   $("listBody").querySelectorAll("[data-place]").forEach(b => b.onclick = () => {
