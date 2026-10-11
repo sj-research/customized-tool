@@ -33,7 +33,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.14";
+const API_VERSION = "0.17";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -103,6 +103,10 @@ function doPost(e) {
         return json_(withLock_(() => saveSurvey_(req)));
       case "addDictionary":
         return json_(withLock_(() => addDictionary_(req)));
+      case "addActions":
+        return json_(withLock_(() => addActions_(req)));
+      case "setZoneIds":
+        return json_(withLock_(() => setZoneIds_(req)));
       default:
         return json_({ ok: false, error: "unknown_action" });
     }
@@ -333,7 +337,8 @@ const NEW_SHEETS = {
   },
 };
 
-const PLACE_STATUS = ["미방문", "관측완료", "상담완료", "재방문필요", "제외"];
+// 삭제는 조사 자체를 하지 않기로 한 행이다. 제외(명단에 있었고 처리 결과를 정한 것)와 뜻이 다르다 (10월 11일 결정)
+const PLACE_STATUS = ["미방문", "관측완료", "상담완료", "재방문필요", "제외", "삭제"];
 
 function setupSchema() {
   const ss = SpreadsheetApp.getActive();
@@ -377,6 +382,17 @@ function setupSchema() {
 function headerIndex_(sheet, name) {
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
   return headers.indexOf(name) + 1;
+}
+
+/** 드롭다운에 빠진 값이 있으면 목록을 다시 건다. 없으면 건드리지 않는다 (10월 11일 추가) */
+function ensureListValues_(sheet, col, values) {
+  const rule = sheet.getRange(2, col).getDataValidation();
+  if (!rule) return;
+  let have;
+  try { have = rule.getCriteriaValues()[0]; } catch (e) { return; }
+  if (!Array.isArray(have)) return;
+  if (values.every(v => have.indexOf(v) >= 0)) return;
+  setListValidation_(sheet, col, values);
 }
 
 function setListValidation_(sheet, col, values) {
@@ -674,7 +690,7 @@ function updatePlaceStatus_(placeId, result, observations, date) {
  * ------------------------------------------------------------------ */
 
 // 앱이 쓰는 진행상태 값. 상담완료는 앱이 쓰지 않고, 이미 상담완료면 완료로 바꿔도 덮어쓰지 않는다
-const MAP_STATUS = ["미방문", "관측완료", "재방문필요", "제외"];
+const MAP_STATUS = ["미방문", "관측완료", "재방문필요", "제외", "삭제"];
 const REVISIT_REASONS = ["키맨 부재", "브레이크 타임", "영업 전", "기타"];
 const PLACE_EXTRA_COLUMNS = ["재방문사유", "재방문예정시각", "관리"];
 
@@ -728,6 +744,7 @@ function setStatus_(req) {
   const timeCol = headerIndex_(sheet, "재방문예정시각");
   const manageCol = headerIndex_(sheet, "관리");
 
+  ensureListValues_(sheet, statusCol, PLACE_STATUS);
   const current = String(sheet.getRange(row, statusCol).getValue());
   const keepConsult = req.status === "관측완료" && current === "상담완료";
   const next = keepConsult ? "상담완료" : req.status;
@@ -936,6 +953,73 @@ function addDictionary_(req) {
   return { ok: true, results };
 }
 
+/**
+ * places의 zone_id를 목록대로 맞춘다 (10월 11일 추가).
+ * zone_id를 TOBE 기준으로 한 번에 다시 계산할 때 쓴다. 목록에 없는 업장은 그대로 둔다
+ * 다른 칸은 건드리지 않아 진행상태 드롭다운과 관리, BEES 체크박스가 그대로 남는다
+ */
+function setZoneIds_(req) {
+  const items = Array.isArray(req.items) ? req.items : [];
+  if (!items.length || items.length > 3000) throw new InputError("items는 1건 이상 3000건 이하여야 합니다");
+  const want = {};
+  items.forEach(it => {
+    const id = String(it.place_id || "").trim();
+    const zid = String(it.zone_id || "").trim();
+    if (!id) throw new InputError("place_id는 필수입니다");
+    if (zid && !/^[A-Z]\d{1,2}$/.test(zid)) throw new InputError(`zone_id가 올바르지 않습니다: ${id} ${zid}`);
+    want[id] = zid;
+  });
+  const sheet = SpreadsheetApp.getActive().getSheetByName("places");
+  const col = headerIndex_(sheet, "zone_id");
+  if (!col) throw new InputError("places 탭에 zone_id 컬럼이 없습니다");
+  const rowCount = Math.max(sheet.getLastRow() - 1, 1);
+  const ids = sheet.getRange(2, 1, rowCount, 1).getValues().map(r => String(r[0]).trim());
+  const unknown = Object.keys(want).filter(id => ids.indexOf(id) < 0);
+  if (unknown.length) throw new InputError(`places에 없는 place_id: ${unknown.slice(0, 10).join(", ")}`);
+  const range = sheet.getRange(2, col, rowCount, 1);
+  const before = range.getValues().map(r => String(r[0]).trim());
+  const next = ids.map((id, i) => [Object.prototype.hasOwnProperty.call(want, id) ? want[id] : before[i]]);
+  // zone_id 칸에는 Z1~Z9만 담긴 드롭다운이 걸려 있어 D1 같은 값이 규칙 위반이 된다.
+  // 규칙을 지우고 쓴 뒤 zones 탭에 있는 구역(ASIS와 TOBE 모두)으로 다시 건다 (10월 11일)
+  const allowed = readSheet_("zones").map(z => String(z.zone_id || "").trim()).filter(Boolean);
+  range.clearDataValidations().setValues(next);
+  if (allowed.length) setListValidation_(sheet, col, allowed.filter((v, i, a) => a.indexOf(v) === i));
+  return { ok: true, rows: rowCount, changed: next.filter((r, i) => r[0] !== before[i]).length, allowed: allowed.length };
+}
+
+const ACTION_FIELDS = ["place_id", "액션유형", "확인할내용", "우선순위", "기한", "상태"];
+
+/**
+ * actions 탭에 액션 아이템을 더한다 (10월 7일 추가).
+ * 상호명 칸은 place_id로 찾는 배열 수식이라 쓰지 않는다. action_id는 기존 최대 번호 다음으로 자동 부여한다
+ * 같은 place_id에 같은 확인할내용이 이미 있으면 건너뛰어 여러 번 실행해도 결과가 같다
+ */
+function addActions_(req) {
+  const items = Array.isArray(req.items) ? req.items : [];
+  if (!items.length || items.length > 200) throw new InputError("items는 1건 이상 200건 이하여야 합니다");
+  const sheet = SpreadsheetApp.getActive().getSheetByName("actions");
+  if (!sheet) throw new InputError("actions 탭이 없습니다");
+  const key = (pid, text) => `${String(pid).trim()}\u0000${String(text).trim()}`;
+  const existing = new Set(readSheet_("actions").map(r => key(r["place_id"], r["확인할내용"])));
+  let next = maxIdNumber_(sheet, "A");
+  let row = firstEmptyRow_(sheet);
+  const results = items.map(item => {
+    const values = {};
+    ACTION_FIELDS.forEach(f => { values[f] = String(item[f] || "").trim().slice(0, 300); });
+    if (!values["place_id"] || !values["확인할내용"]) throw new InputError("place_id와 확인할내용은 필수입니다");
+    if (!values["상태"]) values["상태"] = "대기";
+    const k = key(values["place_id"], values["확인할내용"]);
+    if (existing.has(k)) return { place_id: values["place_id"], result: "이미 있음" };
+    next += 1;
+    const id = "A" + String(next).padStart(3, "0");
+    writeRow_(sheet, row, Object.assign({ action_id: id }, values));
+    existing.add(k);
+    row += 1;
+    return { place_id: values["place_id"], action_id: id, result: "추가" };
+  });
+  return { ok: true, added: results.filter(r => r.result === "추가").length, results };
+}
+
 function setBees_(req) {
   const items = Array.isArray(req.items) ? req.items : [];
   if (!items.length || items.length > 100) throw new InputError("items는 1건 이상 100건 이하여야 합니다");
@@ -984,8 +1068,9 @@ function setBees_(req) {
 }
 
 /** zones 경계(MultiPolygon)에 들어가는 구역. 없으면 빈 문자열. places.zone_id는 ASIS 기준을 유지한다 */
+// places.zone_id는 10월 11일부터 TOBE 기준이다. TOBE 행이 있으면 TOBE로, 없으면 예전처럼 ASIS로 찾는다
 function zoneOfPoint_(lng, lat) {
-  for (const z of zonesOf_("ASIS")) {
+  for (const z of mapZones_()) {
     let geom;
     try { geom = JSON.parse(z["경계"]); } catch (e) { continue; }
     if (!geom || geom.type !== "MultiPolygon") continue;

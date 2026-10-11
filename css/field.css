@@ -167,3 +167,11 @@ h3 { margin: 0; font-size: 18px; }
 .li-place { display: grid; grid-template-columns: 22px 1fr; gap: 2px 8px; width: 100%; padding: 10px 2px; border: 0; border-bottom: 1px solid #eee; background: none; font: inherit; text-align: left; }
 .li-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 1px solid #fff; box-shadow: 0 0 1px rgba(0,0,0,.5); }
 .li-place .li-addr { grid-column: 2; }
+
+/* 구역을 눌렀을 때 뜨는 상태별 수 (10월 11일 추가) */
+.zs-wrap { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0 12px; border-bottom: 1px solid #eee; }
+.zs-chip { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid #ddd;
+  border-radius: 999px; background: #fff; font-size: 14px; color: #333; cursor: pointer; }
+.zs-chip i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.zs-chip b { font-size: 15px; }
+.zs-chip.zs-flat { cursor: default; background: #fafafa; }

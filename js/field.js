@@ -15,6 +15,9 @@ const TRACK_KEY = "cet.track.v1";
 const SHEET_TO_APP = { "미방문": "미조사", "관측완료": "완료", "상담완료": "완료", "재방문필요": "재방문", "제외": "제외" };
 // 앱 버튼 → 시트에 쓰는 값. 완료는 관측완료를 쓴다 (상담완료는 서버가 덮어쓰지 않는다)
 const APP_TO_SHEET = { "미조사": "미방문", "완료": "관측완료", "재방문": "재방문필요", "제외": "제외" };
+// 조사 대상에서 아예 뺀 행. 지도, 카운트, 목록, 검색 어디에도 넣지 않는다 (10월 11일 결정)
+// "제외"는 명단에 있었는데 어떻게 처리할지 정한 결과이고, "삭제"는 조사 자체를 하지 않는다는 뜻이다
+const HIDDEN_STATUS = ["삭제"];
 const STATUS_ORDER = ["미조사", "완료", "관리", "재방문", "제외"];   // 화면 표시용. 관리는 완료 중 관리 체크한 곳
 const STATUS_BUTTONS = ["미조사", "완료", "재방문", "제외"];          // 하단 시트 버튼. 관리는 완료 저장 때 체크로 정한다
 const STATUS_COLOR = { "미조사": "#e8590c", "완료": "#2b8a3e", "관리": "#1864ab", "재방문": "#c2255c", "제외": "#868e96" };
@@ -88,6 +91,7 @@ function applyData(data) {
   const nameCount = countBy(withCoord, "상호명");
   state.places = [];
   withCoord.forEach(p => {
+    if (HIDDEN_STATUS.includes(p["진행상태"])) return;   // 조사 대상이 아니라 화면에 올리지 않는다
     if (!SHEET_TO_APP[p["진행상태"]]) {
       console.warn("진행상태 값을 알 수 없어 지도에서 뺀 행", p.place_id, p["진행상태"]);
       return;
@@ -184,11 +188,57 @@ function drawZones() {
   state.zones.forEach(z => {
     if (!z.geometry) return;   // 신설동 S3, S4처럼 폴리곤 없이 정의한 구역은 그리지 않는다
     z.geometry.coordinates.forEach(poly => {
-      new kakao.maps.Polygon({
+      const shape = new kakao.maps.Polygon({
         map: state.map, path: poly[0].map(([lng, lat]) => new kakao.maps.LatLng(lat, lng)),
         strokeWeight: 2, strokeColor: ZONE_COLOR, strokeOpacity: 0.95, fillColor: ZONE_COLOR, fillOpacity: 0.12,
       });
+      // 구역 안을 누르면 그 구역의 POC 수와 상태별 수를 보여준다 (10월 11일 추가)
+      kakao.maps.event.addListener(shape, "click", () => openZoneStats(z));
+      kakao.maps.event.addListener(shape, "mouseover", () => shape.setOptions({ fillOpacity: 0.22 }));
+      kakao.maps.event.addListener(shape, "mouseout", () => shape.setOptions({ fillOpacity: 0.12 }));
     });
+  });
+}
+
+// 구역 하나의 업장을 고른다. 폴리곤이 여러 조각이면 모두 본다
+function placesInZone(z) {
+  if (!z.geometry) return [];
+  return state.places.filter(p => z.geometry.coordinates.some(poly => pointInRing(+p.lng, +p.lat, poly[0])));
+}
+
+// 구역을 눌렀을 때 뜨는 요약. 숫자를 누르면 그 상태의 업장 목록으로 넘어간다
+function openZoneStats(z) {
+  const rows = placesInZone(z);
+  const name = String(z["구역명"] || z.zone_id || "");
+  const n = s => rows.filter(p => appStatus(p) === s).length;
+  const bees = rows.filter(p => p.bees).length;
+  $("listTitle").textContent = `${z.zone_id ? z.zone_id + " " : ""}${name}`;
+  $("listCount").textContent = `POC ${rows.length}곳`;
+  const chips = STATUS_ORDER.map(s =>
+    `<button class="zs-chip" data-zstat="${s}"><i style="background:${STATUS_COLOR[s]}"></i>${s} <b>${n(s)}</b></button>`).join("");
+  $("listBody").innerHTML =
+    `<li class="zs-wrap">${chips}${bees ? `<span class="zs-chip zs-flat"><i style="background:${BEES_COLOR}"></i>Bees <b>${bees}</b></span>` : ""}</li>` +
+    (rows.length ? "" : `<li class="r-empty">이 구역에 좌표가 있는 업장이 없습니다</li>`);
+  $("listBody").querySelectorAll("[data-zstat]").forEach(b => b.onclick = () => openZoneList(z, b.dataset.zstat));
+  $("listModal").hidden = false;
+}
+
+// 구역 요약에서 상태 하나를 누르면 그 업장 목록을 보여준다
+function openZoneList(z, key) {
+  const rows = placesInZone(z).filter(p => appStatus(p) === key)
+    .sort((a, b) => String(a.displayName).localeCompare(String(b.displayName)));
+  $("listTitle").textContent = `${String(z["구역명"] || z.zone_id || "")} / ${key}`;
+  $("listCount").textContent = `${rows.length}곳`;
+  $("listBody").innerHTML = rows.length
+    ? rows.map(p => `<li><button class="li-item li-place" data-place="${esc(p.place_id)}">
+        <span class="li-rank"><i class="li-dot" style="background:${p.bees && appStatus(p) === "미조사" ? BEES_COLOR : STATUS_COLOR[appStatus(p)]}"></i></span>
+        <span class="li-name">${esc(p.displayName)}</span>
+        <span class="li-addr">${esc(p["주소"] || "")}</span>
+      </button></li>`).join("")
+    : `<li class="r-empty">해당하는 업장이 없습니다</li>`;
+  $("listBody").querySelectorAll("[data-place]").forEach(b => b.onclick = () => {
+    $("listModal").hidden = true;
+    focusPlace(b.dataset.place);
   });
 }
 
