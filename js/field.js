@@ -219,25 +219,53 @@ function openZoneStats(z) {
   // Bees도 다른 칩과 똑같이 눌러서 목록을 본다 (10월 11일. 하나만 안 눌리면 헷갈린다)
   const chips = STATUS_ORDER.map(s => chip(s, STATUS_COLOR[s], n(s))).join("") +
     (bees ? chip("Bees", BEES_COLOR, bees) : "");
+  // 길별로도 나눠 본다. 밀집 상권이라 좌표로 묶으면 다 이어져서 도로명으로 가른다 (10월 12일)
+  const byStreet = {};
+  rows.forEach(p => {
+    const s = streetOf(p);
+    (byStreet[s] = byStreet[s] || []).push(p);
+  });
+  const streets = Object.keys(byStreet).sort((a, b) => byStreet[b].length - byStreet[a].length || a.localeCompare(b));
+  const left = rs => rs.filter(p => appStatus(p) === "미조사").length;
+  const lines = streets.map(s => {
+    const rs = byStreet[s];
+    const l = left(rs);
+    return `<li><button class="li-item zs-street" data-street="${esc(s)}">
+      <span class="li-rank"></span><span class="li-name">${esc(s)}</span>
+      <span class="li-addr">${rs.length}곳${l ? ` · 미조사 <b style="color:${STATUS_COLOR["미조사"]}">${l}</b>` : " · 다 봄"}</span>
+    </button></li>`;
+  }).join("");
   $("listBody").innerHTML = `<li class="zs-wrap">${chips}</li>` +
-    (rows.length ? "" : `<li class="r-empty">이 구역에 좌표가 있는 업장이 없습니다</li>`);
+    (rows.length ? `<li class="zs-head">길별 ${streets.length}개</li>${lines}`
+                 : `<li class="r-empty">이 구역에 좌표가 있는 업장이 없습니다</li>`);
   $("listBody").querySelectorAll("[data-zstat]").forEach(b => b.onclick = () => openZoneList(z, b.dataset.zstat));
+  $("listBody").querySelectorAll("[data-street]").forEach(b => b.onclick = () => openZoneList(z, { street: b.dataset.street }));
   $("listModal").hidden = false;
 }
 
-// 구역 요약에서 상태 하나를 누르면 그 업장 목록을 보여준다
-// key는 진행상태(미조사, 완료, 관리, 재방문, 제외) 또는 "Bees"
+// 주소를 도로명과 번지로 가른다. 예: "서울 종로구 종로40가길 18" -> ["종로40가길", 18]
+// 도로명 뒤에는 반드시 빈칸이 오므로 "종로40가길"이 "종로"로 잘리지 않는다
+function splitAddr(p) {
+  const m = String(p["주소"] || "").match(/^서울\s+\S+구\s+(.+?)\s+(\d+)/);
+  return m ? [m[1], Number(m[2])] : ["주소 없음", 99999];
+}
+const streetOf = p => splitAddr(p)[0];
+const addrNum = p => splitAddr(p)[1];
+
+// key는 진행상태(미조사, 완료, 관리, 재방문, 제외)나 "Bees", 또는 { street: "종로40가길" }
 function openZoneList(z, key) {
-  const match = key === "Bees" ? (p => p.bees) : (p => appStatus(p) === key);
+  const st = key && key.street;
+  const match = st ? (p => streetOf(p) === st)
+    : key === "Bees" ? (p => p.bees) : (p => appStatus(p) === key);
   const rows = placesInZone(z).filter(match)
-    .sort((a, b) => String(a.displayName).localeCompare(String(b.displayName)));
-  $("listTitle").textContent = `${String(z["구역명"] || z.zone_id || "")} / ${key}`;
+    .sort((a, b) => (st ? (addrNum(a) - addrNum(b)) : 0) || String(a.displayName).localeCompare(String(b.displayName)));
+  $("listTitle").textContent = `${String(z["구역명"] || z.zone_id || "")} / ${st || key}`;
   $("listCount").textContent = `${rows.length}곳`;
   $("listBody").innerHTML = rows.length
     ? rows.map(p => `<li><button class="li-item li-place" data-place="${esc(p.place_id)}">
         <span class="li-rank"><i class="li-dot" style="background:${p.bees && appStatus(p) === "미조사" ? BEES_COLOR : STATUS_COLOR[appStatus(p)]}"></i></span>
         <span class="li-name">${esc(p.displayName)}</span>
-        <span class="li-addr">${key === "Bees" ? esc(appStatus(p)) + " / " : ""}${esc(p["주소"] || "")}</span>
+        <span class="li-addr">${key === "Bees" || st ? esc(appStatus(p)) + " / " : ""}${esc(p["주소"] || "")}</span>
       </button></li>`).join("")
     : `<li class="r-empty">해당하는 업장이 없습니다</li>`;
   $("listBody").querySelectorAll("[data-place]").forEach(b => b.onclick = () => {

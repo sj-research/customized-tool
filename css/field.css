@@ -174,3 +174,8 @@ h3 { margin: 0; font-size: 18px; }
   border-radius: 999px; background: #fff; font-size: 14px; color: #333; cursor: pointer; }
 .zs-chip i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .zs-chip b { font-size: 15px; }
+
+/* 구역 통계의 길별 목록 (10월 12일 추가) */
+.zs-head { padding: 7px 2px 4px; color: #667; font-size: 12px; font-weight: 600; border-bottom: 1px solid #eee; }
+.zs-street { width: 100%; background: none; border: none; text-align: left; cursor: pointer; }
+.zs-street .li-name { font-weight: 600; }
