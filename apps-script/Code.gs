@@ -33,7 +33,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.18";
+const API_VERSION = "0.19";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -107,6 +107,8 @@ function doPost(e) {
         return json_(withLock_(() => addActions_(req)));
       case "setZoneIds":
         return json_(withLock_(() => setZoneIds_(req)));
+      case "ensureStreetColumn":
+        return json_(withLock_(() => ensureStreetColumn_()));
       default:
         return json_({ ok: false, error: "unknown_action" });
     }
@@ -693,6 +695,37 @@ function updatePlaceStatus_(placeId, result, observations, date) {
 const MAP_STATUS = ["미방문", "관측완료", "재방문필요", "제외", "삭제"];
 const REVISIT_REASONS = ["키맨 부재", "브레이크 타임", "영업 전", "기타"];
 const PLACE_EXTRA_COLUMNS = ["재방문사유", "재방문예정시각", "관리"];
+
+const STREET_COLUMN = "길";
+
+/**
+ * places에 "길" 열을 수식으로 만든다 (10월 12일 추가).
+ * 주소의 셋째 토막(서울 / OO구 / 도로명)을 도로명으로 본다. 644행에서 현장 지도 규칙과 결과가 같은 것을 확인했다
+ * 값이 아니라 수식이라 새 업장이 들어와도 자동으로 채워진다. 여러 번 실행해도 결과가 같다
+ */
+function ensureStreetColumn_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName("places");
+  if (!sheet) throw new InputError("places 탭이 없습니다");
+  const addrCol = headerIndex_(sheet, "주소");
+  if (!addrCol) throw new InputError("places 탭에 주소 컬럼이 없습니다");
+  const a = columnLetter_(addrCol);
+  const r = addHeaderColumn_(sheet, STREET_COLUMN);
+  const formula = '={"' + STREET_COLUMN + '";ARRAYFORMULA(IF(' + a + '2:' + a + '="","",' +
+    'IFERROR(REGEXEXTRACT(' + a + '2:' + a + ',"^\\S+\\s+\\S+\\s+(\\S+)"),"")))}';
+  sheet.getRange(1, r.col).setFormula(formula);
+  return { ok: true, column: r.col, added: r.added, formula: formula };
+}
+
+/** 1 -> A, 27 -> AA */
+function columnLetter_(n) {
+  let s = "";
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = (n - m - 1) / 26;
+  }
+  return s;
+}
 
 /** 헤더에 컬럼이 없으면 맨 뒤에 추가한다. { col, added } */
 function addHeaderColumn_(sheet, name) {
