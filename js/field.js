@@ -30,6 +30,7 @@ const fixtureMode = !!new URLSearchParams(location.search).get("fixture");
 
 const state = {
   places: [],            // 좌표와 매핑되는 진행상태가 있는 행만
+  hl: null,              // 지도에서 강조 중인 길 { zone, street, ids, line }
   byId: {},
   zones: [],
   blogRank: [],          // 블로그 노출 목록. 목록 화면에서만 쓴다
@@ -176,7 +177,7 @@ function initMap() {
   state.map = new kakao.maps.Map($("map"), { center: new kakao.maps.LatLng(37.5685, 127.0085), level: 4 });
   kakao.maps.event.addListener(state.map, "zoom_changed", updateMarkerVisibility);
   kakao.maps.event.addListener(state.map, "dragstart", () => setFollow(false));
-  kakao.maps.event.addListener(state.map, "click", () => { closeSheet(); closeSearch(); });
+  kakao.maps.event.addListener(state.map, "click", () => { closeSheet(); closeSearch(); clearHighlight(); });
   // PC에서는 오른쪽 클릭으로도 핀을 추가한다
   kakao.maps.event.addListener(state.map, "rightclick", e => openPinSheet(e.latLng.getLat(), e.latLng.getLng()));
   initLongPress();
@@ -239,7 +240,7 @@ function openZoneStats(z) {
     (rows.length ? `<li class="zs-head">길별 ${streets.length}개</li>${lines}`
                  : `<li class="r-empty">이 구역에 좌표가 있는 업장이 없습니다</li>`);
   $("listBody").querySelectorAll("[data-zstat]").forEach(b => b.onclick = () => openZoneList(z, b.dataset.zstat));
-  $("listBody").querySelectorAll("[data-street]").forEach(b => b.onclick = () => openZoneList(z, { street: b.dataset.street }));
+  $("listBody").querySelectorAll("[data-street]").forEach(b => b.onclick = () => highlightStreet(z, b.dataset.street));
   $("listModal").hidden = false;
 }
 
@@ -251,6 +252,57 @@ function splitAddr(p) {
 }
 const streetOf = p => splitAddr(p)[0];
 const addrNum = p => splitAddr(p)[1];
+
+/* ---------------- 길 강조 ---------------- */
+// 길 이름만 봐서는 지도 어디인지 알기 어려워서, 누르면 그 길을 지도에 그리고 나머지를 흐리게 한다 (10월 12일)
+
+function highlightStreet(z, street) {
+  const rows = placesInZone(z).filter(p => streetOf(p) === street)
+    .sort((a, b) => addrNum(a) - addrNum(b));
+  if (!rows.length) return;
+  clearHighlight();
+  state.hl = { zone: z, street, ids: new Set(rows.map(p => p.place_id)) };
+
+  const path = rows.map(p => new kakao.maps.LatLng(+p.lat, +p.lng));
+  if (path.length > 1) {
+    state.hl.line = new kakao.maps.Polyline({
+      map: state.map, path, strokeWeight: 8, strokeColor: "#1f3a5f", strokeOpacity: 0.5, strokeStyle: "solid", zIndex: 2,
+    });
+  }
+  const bounds = new kakao.maps.LatLngBounds();
+  path.forEach(ll => bounds.extend(ll));
+  setFollow(false);
+  state.map.setBounds(bounds, 60, 60, 60, 60);
+  // 마커는 가까이 봐야 보인다. 멀면 당기고, 한 곳뿐이라 너무 붙으면 민다
+  if (state.map.getLevel() > MARKER_MAX_LEVEL) state.map.setLevel(MARKER_MAX_LEVEL);
+  if (state.map.getLevel() < 2) state.map.setLevel(2);
+  updateMarkerVisibility();
+  paintHighlight();
+
+  const left = rows.filter(p => appStatus(p) === "미조사").length;
+  $("sbName").textContent = street;
+  $("sbCount").textContent = `${rows.length}곳${left ? ` · 미조사 ${left}` : " · 다 봄"}`;
+  $("streetBar").hidden = false;
+  $("sbList").onclick = () => openZoneList(z, { street });
+  $("listModal").hidden = true;
+}
+
+// 강조 중인 길의 마커만 또렷하게, 나머지는 흐리게
+function paintHighlight() {
+  const hl = state.hl;
+  Object.keys(state.overlays).forEach(id => {
+    const el = state.overlays[id].el;
+    el.classList.toggle("hl", !!hl && hl.ids.has(id));
+    el.classList.toggle("dim", !!hl && !hl.ids.has(id));
+  });
+}
+
+function clearHighlight() {
+  if (state.hl && state.hl.line) state.hl.line.setMap(null);
+  state.hl = null;
+  paintHighlight();
+  $("streetBar").hidden = true;
+}
 
 // key는 진행상태(미조사, 완료, 관리, 재방문, 제외)나 "Bees", 또는 { street: "종로40가길" }
 function openZoneList(z, key) {
@@ -305,6 +357,8 @@ function paintMarker(placeId) {
   o.el.style.background = p.bees && appStatus(p) === "미조사" ? BEES_COLOR : STATUS_COLOR[appStatus(p)];   // 방문 전 Bees만 노란색, 관리는 파란색
   o.el.classList.toggle("selected", state.selected === placeId);
   o.el.classList.toggle("pending", !!state.pending[placeId]);
+  o.el.classList.toggle("hl", !!state.hl && state.hl.ids.has(placeId));
+  o.el.classList.toggle("dim", !!state.hl && !state.hl.ids.has(placeId));
   o.el.setAttribute("aria-label", `${p.bees ? "Bees " : ""}${p.displayName} ${appStatus(p)}`);
 }
 
@@ -937,6 +991,7 @@ async function start() {
   $("locBtn").onclick = onLocButton;
   $("openList").onclick = openList;
   $("closeList").onclick = () => ($("listModal").hidden = true);
+  $("sbClear").onclick = clearHighlight;
   initSearch();
   // 앱을 백그라운드로 보내면 위치 추적을 멈춘다. 돌아오면 다시 켠다
   document.addEventListener("visibilitychange", () => {

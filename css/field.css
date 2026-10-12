@@ -179,3 +179,14 @@ h3 { margin: 0; font-size: 18px; }
 .zs-head { padding: 7px 2px 4px; color: #667; font-size: 12px; font-weight: 600; border-bottom: 1px solid #eee; }
 .zs-street { width: 100%; background: none; border: none; text-align: left; cursor: pointer; }
 .zs-street .li-name { font-weight: 600; }
+
+/* 길 강조 (10월 12일 추가) */
+.street-bar { position: absolute; left: 10px; right: 10px; bottom: 12px; z-index: 6;
+  display: flex; align-items: center; gap: 8px; background: rgba(31,58,95,.95); color: #fff;
+  border-radius: 10px; padding: 9px 10px; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+.street-bar .sb-name { font-weight: 700; font-size: 15px; }
+.street-bar .sb-count { flex: 1; font-size: 13px; opacity: .9; }
+.street-bar button { background: rgba(255,255,255,.18); color: #fff; border: none;
+  border-radius: 7px; padding: 7px 10px; font-size: 13px; }
+.mk.dim { opacity: .22; }
+.mk.hl { box-shadow: 0 0 0 4px rgba(255,255,255,.95), 0 0 0 7px #1f3a5f; z-index: 5; }
