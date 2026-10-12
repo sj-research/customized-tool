@@ -324,6 +324,8 @@ function openZoneList(z, key) {
     $("listModal").hidden = true;
     focusPlace(b.dataset.place);
   });
+  // 칩에서 부를 때는 이미 열려 있지만, 길 강조 띠의 목록 단추에서 부를 때는 닫혀 있다 (10월 12일)
+  $("listModal").hidden = false;
 }
 
 function rebuildMarkers() {
