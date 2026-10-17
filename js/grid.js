@@ -16,8 +16,15 @@ const f2 = v => (v == null ? "-" : Number(v).toFixed(2));
 const n0 = v => (v == null ? "-" : Math.round(v).toLocaleString());
 
 let D = null, map = null;
-const layers = { zones: [], grids: [], dongs: [], clusters: [], labels: [] };
-const on = { zones: true, grids: true, dongs: false, clusters: false, labels: true };
+const layers = { zones: [], grids: [], dongs: [], clusters: [], labels: [], lodging: [] };
+const on = { zones: true, grids: true, dongs: false, clusters: false, labels: true, lodging: false };
+
+// 숙박 업태 분류. F 외국인 지향, M 여관 모텔, U 업태 미분류
+const LODGE = {
+  F: { color: "#d00000", label: "외국인 지향" },
+  M: { color: "#8d99ae", label: "여관, 모텔" },
+  U: { color: "#ffffff", label: "미분류, 펜션" },
+};
 
 function fail(html) {
   $("error").style.display = "block";
@@ -114,6 +121,42 @@ function drawClusters() {
   }
 }
 
+function drawLodging() {
+  const K = kakao.maps;
+  (D.lodging || []).forEach(p => {
+    const c = LODGE[p.g] || LODGE.U;
+    const ov = new K.CustomOverlay({
+      position: new K.LatLng(p.y, p.x), yAnchor: .5, xAnchor: .5, zIndex: 11,
+      content: `<div class="ld ld-${p.g}" style="background:${c.color}" title="${p.n} (${p.k})"></div>`,
+      clickable: true,
+    });
+    layers.lodging.push(ov);
+  });
+}
+
+function lodgingTable() {
+  const L = D.lodgingstat;
+  if (!L) return "";
+  const cl = Object.entries(L.clusters).map(([nm, c]) =>
+    `<tr><td>${nm} <span class="dim">${c.grids}격자</span></td><td>${c.all}</td>
+     <td><b>${c.F}</b></td><td>${c.M}</td><td>${c.U}</td></tr>`).join("");
+  const zs = ZONE_ORDER.map(z => {
+    const r = L.zones[z]; if (!r) return "";
+    return `<tr><td>${z}</td><td>${r.poly.all}</td><td><b>${r.poly.F}</b></td>
+      <td>${r.poly.M}</td><td>${r.bbox.all}</td></tr>`;
+  }).join("");
+  return `<h2>숙박업소 <em>총 ${L.total}곳</em></h2>
+    <table><thead><tr><th>묶음</th><th>전체</th><th>외국인<br>지향</th><th>여관<br>모텔</th><th>미분<br>류</th></tr></thead>
+    <tbody>${cl}</tbody></table>
+    <table style="margin-top:6px"><thead><tr><th>구역</th><th>폴리곤<br>전체</th><th>외국인<br>지향</th><th>여관<br>모텔</th><th>bbox<br>전체</th></tr></thead>
+    <tbody>${zs}</tbody></table>
+    <div class="dim" style="margin-top:6px">
+      ${Object.entries(LODGE).map(([k, v]) =>
+        `<span class="sw" style="display:inline-block;background:${v.color};border:1px solid #bbb;margin:0 3px 0 0"></span>${v.label}`).join(" ")}
+      <br>카카오 지도 등재 기준이다. 객실 수가 없어 업소 수만 쓴다. 에어비앤비는 빠져 있다.
+      업태 미분류와 펜션 ${L.clusters["동대문"].U + L.clusters["신설동"].U}곳(미분류 19, 펜션 3)은 외국인 지향 집계에 넣지 않았다.</div>`;
+}
+
 function centroid(ring) {
   let la = 0, ln = 0;
   ring.forEach(p => { la += p[0]; ln += p[1]; });
@@ -147,6 +190,7 @@ function buildTables() {
 
   $("dtab").querySelectorAll("tr[data-d]").forEach(tr =>
     tr.addEventListener("click", () => pickDong(tr.dataset.d)));
+  $("ldg").innerHTML = lodgingTable();
   $("meta").textContent = `${D.meta.period} · 공통 ${D.meta.slots.toLocaleString()}슬롯 · ${D.meta.note} · 갱신 ${D.meta.updated}`;
 }
 
@@ -287,7 +331,7 @@ async function main() {
   const [la, ln, lv] = VIEWS.all;
   map = new kakao.maps.Map($("map"), { center: new kakao.maps.LatLng(la, ln), level: lv });
   map.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
-  drawGrids(); drawZones(); drawDongs(); drawClusters();
+  drawGrids(); drawZones(); drawDongs(); drawClusters(); drawLodging();
   applyLayers();
   wire();
 }

@@ -64,3 +64,10 @@ body.folded #toggle { right: 10px; }
 .lb.dg { background: #fff; border: 2px solid; font-weight: 700; font-size: 10px; box-shadow: none; }
 .lb.out { background: #fff; border: 2px dotted #9e9e9e; color: #555; font-weight: 600; font-size: 10px; }
 .lb.out span { font-weight: 500; }
+
+/* 숙박업소 점. F 외국인 지향, M 여관 모텔, U 업태 미분류 */
+.ld { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35); cursor: pointer; }
+.ld-F { width: 12px; height: 12px; border-width: 2px; }
+.ld-U { border-color: #555; }
+#ldg table { margin-bottom: 0; }

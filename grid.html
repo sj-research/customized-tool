@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>격자 분석</title>
-<link rel="stylesheet" href="css/grid.css?v=0.2.0">
+<link rel="stylesheet" href="css/grid.css?v=0.3.0">
 <script>
-  window.APP_VERSION = "0.2.0";
+  window.APP_VERSION = "0.3.0";
   function showFatal(msg) {
     var el = document.getElementById("fatal");
     if (!el) { el = document.createElement("div"); el.id = "fatal"; document.documentElement.appendChild(el); }
@@ -27,6 +27,7 @@
     <button data-layer="grids" class="on">격자</button>
     <button data-layer="dongs">행정동</button>
     <button data-layer="clusters">묶음</button>
+    <button data-layer="lodging">숙박</button>
     <button data-layer="labels" class="on">라벨</button>
   </div>
   <div class="views">
@@ -52,7 +53,9 @@
       <th>단기÷장기</th><th>순위</th>
     </tr></thead><tbody></tbody></table>
 
-    <h2>선택 상세</h2>
+    <div id="ldg"></div>
+
+  <h2>선택 상세</h2>
     <div id="pick" class="dim">지도에서 격자나 행정동, 묶음을 눌러라.</div>
     <p class="foot" id="meta"></p>
   </div>
@@ -62,6 +65,6 @@
 <div id="error"></div>
 
 <script src="js/common.js?v=0.22.0"></script>
-<script src="js/grid.js?v=0.2.0"></script>
+<script src="js/grid.js?v=0.3.0"></script>
 </body>
 </html>
