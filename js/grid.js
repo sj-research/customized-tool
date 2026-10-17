@@ -19,11 +19,11 @@ let D = null, map = null;
 const layers = { zones: [], grids: [], dongs: [], clusters: [], labels: [], lodging: [] };
 const on = { zones: true, grids: true, dongs: false, clusters: false, labels: true, lodging: false };
 
-// 숙박 업태 분류. F 외국인 지향, M 여관 모텔, U 업태 미분류
+// 숙박 분류. F 외국인 지향, M 여관 모텔, E 기타(판단 보류)
 const LODGE = {
   F: { color: "#d00000", label: "외국인 지향" },
   M: { color: "#8d99ae", label: "여관, 모텔" },
-  U: { color: "#ffffff", label: "미분류, 펜션" },
+  E: { color: "#ffffff", label: "기타" },
 };
 
 function fail(html) {
@@ -124,7 +124,7 @@ function drawClusters() {
 function drawLodging() {
   const K = kakao.maps;
   (D.lodging || []).forEach(p => {
-    const c = LODGE[p.g] || LODGE.U;
+    const c = LODGE[p.g] || LODGE.E;
     const ov = new K.CustomOverlay({
       position: new K.LatLng(p.y, p.x), yAnchor: .5, xAnchor: .5, zIndex: 11,
       content: `<div class="ld ld-${p.g}" style="background:${c.color}" title="${p.n} (${p.k})"></div>`,
@@ -139,22 +139,26 @@ function lodgingTable() {
   if (!L) return "";
   const cl = Object.entries(L.clusters).map(([nm, c]) =>
     `<tr><td>${nm} <span class="dim">${c.grids}격자</span></td><td>${c.all}</td>
-     <td><b>${c.F}</b></td><td>${c.M}</td><td>${c.U}</td></tr>`).join("");
+     <td><b>${c.F}</b></td><td>${c.M}</td><td>${c.E}</td>
+     <td><b>${f2(c.dawn["단기"])}</b></td></tr>`).join("");
   const zs = ZONE_ORDER.map(z => {
     const r = L.zones[z]; if (!r) return "";
     return `<tr><td>${z}</td><td>${r.poly.all}</td><td><b>${r.poly.F}</b></td>
-      <td>${r.poly.M}</td><td>${r.bbox.all}</td></tr>`;
+      <td>${r.poly.M}</td><td>${r.bbox.all}</td><td><b>${f2(r.dawn["단기"])}</b></td></tr>`;
   }).join("");
   return `<h2>숙박업소 <em>총 ${L.total}곳</em></h2>
-    <table><thead><tr><th>묶음</th><th>전체</th><th>외국인<br>지향</th><th>여관<br>모텔</th><th>미분<br>류</th></tr></thead>
+    <table><thead><tr><th>묶음</th><th>전체</th><th>외국인<br>지향</th><th>여관<br>모텔</th><th>기타</th>
+      <th>단기<br>새벽÷낮</th></tr></thead>
     <tbody>${cl}</tbody></table>
-    <table style="margin-top:6px"><thead><tr><th>구역</th><th>폴리곤<br>전체</th><th>외국인<br>지향</th><th>여관<br>모텔</th><th>bbox<br>전체</th></tr></thead>
+    <table style="margin-top:6px"><thead><tr><th>구역</th><th>폴리곤<br>전체</th><th>외국인<br>지향</th><th>여관<br>모텔</th><th>bbox<br>전체</th>
+      <th>단기<br>새벽÷낮</th></tr></thead>
     <tbody>${zs}</tbody></table>
     <div class="dim" style="margin-top:6px">
       ${Object.entries(LODGE).map(([k, v]) =>
         `<span class="sw" style="display:inline-block;background:${v.color};border:1px solid #bbb;margin:0 3px 0 0"></span>${v.label}`).join(" ")}
+      <br>새벽÷낮이 1을 넘으면 새벽(01~06시) 체류가 낮(11~14시)보다 많다는 뜻이다.
       <br>카카오 지도 등재 기준이다. 객실 수가 없어 업소 수만 쓴다. 에어비앤비는 빠져 있다.
-      업태 미분류와 펜션 ${L.clusters["동대문"].U + L.clusters["신설동"].U}곳(미분류 19, 펜션 3)은 외국인 지향 집계에 넣지 않았다.</div>`;
+      기타 ${L.clusters["동대문"].E + L.clusters["신설동"].E}곳은 업태와 상호로 판단이 안 돼 어느 쪽에도 넣지 않았다.</div>`;
 }
 
 function centroid(ring) {

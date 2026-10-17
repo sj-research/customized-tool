@@ -69,5 +69,5 @@ body.folded #toggle { right: 10px; }
 .ld { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid #fff;
   box-shadow: 0 0 0 1px rgba(0,0,0,.35); cursor: pointer; }
 .ld-F { width: 12px; height: 12px; border-width: 2px; }
-.ld-U { border-color: #555; }
+.ld-E { border-color: #555; }
 #ldg table { margin-bottom: 0; }
