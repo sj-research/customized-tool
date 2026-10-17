@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>구역 분석</title>
+<link rel="stylesheet" href="css/zones.css?v=0.22.0">
+<script>
+  window.APP_VERSION = "0.22.0";
+  function showFatal(msg) {
+    var el = document.getElementById("fatal");
+    if (!el) { el = document.createElement("div"); el.id = "fatal"; document.documentElement.appendChild(el); }
+    el.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99;background:#b3261e;color:#fff;padding:10px;font:13px/1.4 sans-serif;white-space:pre-wrap";
+    el.textContent = "오류 (v" + window.APP_VERSION + "): " + msg;
+  }
+  window.addEventListener("error", function (e) { showFatal(e.message + (e.filename ? "\n" + e.filename.split("/").pop() + ":" + e.lineno : "")); });
+  window.addEventListener("unhandledrejection", function (e) { showFatal(String(e.reason && e.reason.message || e.reason)); });
+</script>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="bar">
+  <span class="title">구역 분석</span>
+  <div class="tabs">
+    <button data-mode="zones" class="on">Zones</button>
+    <button data-mode="survey">조사 현황</button>
+  </div>
+  <div id="counts"></div>
+  <div class="views">
+    <button data-view="all">전체</button>
+    <button data-view="ddm">동대문</button>
+    <button data-view="sin">신설동</button>
+    <button id="reload" title="시트에서 다시 받기">새로고침</button>
+  </div>
+</div>
+
+<div id="legend"></div>
+<div id="error"></div>
+
+<script src="js/common.js?v=0.22.0"></script>
+<script src="js/zones.js?v=0.22.0"></script>
+</body>
+</html>
