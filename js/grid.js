@@ -96,7 +96,7 @@ function drawClusters() {
     layers.clusters.push(new K.CustomOverlay({
       position: new K.LatLng(p[0], p[1]), yAnchor: 1.3, zIndex: 9,
       content: `<div class="lb big" style="background:${c.color}">${nm} 묶음 · 격자 ${c.ngrid}개<br>
-        <span>외국인 ${f2(c.fo)}% · 단기비 ${f2(c.sr)}</span></div>`,
+        <span>외국인 ${f2(c.fo)}% · 단기÷장기 ${f2(c.sl)}</span></div>`,
     }));
   });
   const d = D.dropped;
@@ -134,15 +134,15 @@ function buildTables() {
   $("ztab").querySelector("tbody").innerHTML = ZONE_ORDER.filter(z => Z[z]).map(z => {
     const r = Z[z];
     return `<tr data-z="${z}"><td><span class="sw" style="display:inline-block;background:${ZONE_COLOR[z]};margin-right:4px"></span>${z}</td>
-      <td>${r.ngrid}</td><td>${f2(r.fo)}%</td><td>${f2(r.sr)}</td></tr>`;
+      <td>${r.ngrid}</td><td>${f2(r.fo)}%</td><td>${f2(r.sl)}</td></tr>`;
   }).join("") + Object.entries(D.clusters || {}).map(([nm, c]) =>
-    `<tr class="sum"><td>${nm}</td><td>${c.ngrid}</td><td>${f2(c.fo)}%</td><td>${f2(c.sr)}</td></tr>`).join("");
+    `<tr class="sum"><td>${nm}</td><td>${c.ngrid}</td><td>${f2(c.fo)}%</td><td>${f2(c.sl)}</td></tr>`).join("");
 
   const S = D.dongstat || {};
   $("dtab").querySelector("tbody").innerHTML = Object.keys(S).sort((a, b) => S[b].fo - S[a].fo).map(d => {
     const r = S[d];
     return `<tr data-d="${d}"><td>${(D.names[d] || d).replace(/^\S+\s/, "")}</td>
-      <td>${f1(r.fo)}%</td><td>${r.rank_fo}</td><td>${f2(r.sr)}</td><td>${r.rank_sr}</td></tr>`;
+      <td>${f1(r.fo)}%</td><td>${r.rank_fo}</td><td>${f2(r.sl)}</td><td>${r.rank_sl}</td></tr>`;
   }).join("");
 
   $("dtab").querySelectorAll("tr[data-d]").forEach(tr =>
@@ -154,15 +154,15 @@ function bandTable(band) {
   if (!band) return "";
   const rows = ["내국인", "장기", "단기"].map(lab => {
     const b = band[lab]; if (!b) return "";
-    const meal = (b["낮"] * 6 + b["저녁"] * 5) / 11;
+    const meal = (b["낮"] * 4 + b["저녁"] * 4) / 8;
     return `<tr><td>${lab}</td><td>${n0(b["낮"])}</td><td>${n0(b["저녁"])}</td>
       <td>${n0(b["심야"])}</td><td>${n0(b["새벽"])}</td>
       <td><b>${f2(b["새벽"] ? meal / b["새벽"] : 0)}</b></td>
       <td>${f2(b["낮"] ? b["저녁"] / b["낮"] : 0)}</td></tr>`;
   }).join("");
   return `<table style="font-size:10px;margin-top:4px"><thead><tr><th>집단</th>
-    <th>낮<br><em>11~16</em></th><th>저녁<br><em>17~21</em></th><th>심야<br><em>22~01</em></th>
-    <th>새벽<br><em>03~06</em></th><th>식사<br>÷새벽</th><th>저녁<br>÷낮</th></tr></thead><tbody>${rows}</tbody></table>`;
+    <th>낮<br><em>11~14</em></th><th>저녁<br><em>17~20</em></th><th>심야<br><em>21~00</em></th>
+    <th>새벽<br><em>01~06</em></th><th>식사<br>÷새벽</th><th>저녁<br>÷낮</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function pickGrid(g) {
@@ -173,7 +173,7 @@ function pickGrid(g) {
     const r = Z[z]; if (!r) return "";
     return `<div style="margin-top:9px;padding-top:7px;border-top:1px solid #eee">
       <div class="nm">${z} ${r.name}</div>
-      <div class="dim">격자 ${r.ngrid}개 · 외국인 ${f2(r.fo)}% · 단기비 ${f2(r.sr)}<br>
+      <div class="dim">격자 ${r.ngrid}개 · 외국인 ${f2(r.fo)}% · 단기÷장기 ${f2(r.sl)}<br>내국인 ${f1(r.kp)}% / 장기 ${f1(r.lp)}% / 단기 ${f1(r.sp)}%<br>
       내국인 ${n0(r.k)} / 장기 ${n0(r.l)} / 단기 ${n0(r.s)}</div>${bandTable(r.band)}</div>`;
   }).join("");
   $("pick").innerHTML = `<div style="font-size:12px"><span class="nm">${g.code}</span>
@@ -212,7 +212,8 @@ function pickDong(code) {
     <table><tbody>
       <tr><td>외국인 비중 <em class="dim">(장+단)/전체</em></td><td><b>${f2(r.fo)}%</b></td><td>${r.rank_fo}위 / ${r.n}</td></tr>
       <tr><td>단기 비중 <em class="dim">단/전체</em></td><td><b>${f2(r.sw)}%</b></td><td>${r.rank_sw}위</td></tr>
-      <tr><td>단기비 <em class="dim">단/(장+단)</em></td><td><b>${f2(r.sr)}</b></td><td>${r.rank_sr}위</td></tr>
+      <tr><td>장기 비중 <em class="dim">장/전체</em></td><td><b>${f2(r.lw)}%</b></td><td></td></tr>
+      <tr><td>단기÷장기 <em class="dim">단/장</em></td><td><b>${f2(r.sl)}</b></td><td>${r.rank_sl}위</td></tr>
     </tbody></table>
     <div style="margin-top:8px;font-size:10.5px">
       <div class="dim">단기 체류 상위 국적 <em>(마스킹률)</em></div>${nat("단기")}
@@ -232,12 +233,10 @@ function pickCluster(nm) {
     <div class="dim" style="margin:3px 0 6px">내국인 ${n0(c.k)} / 장기 ${n0(c.l)} / 단기 ${n0(c.s)}</div>
     <table><tbody>
       <tr><td>외국인 비중</td><td><b>${f2(c.fo)}%</b></td></tr>
-      <tr><td>단기비</td><td><b>${f2(c.sr)}</b></td></tr>
+      <tr><td>단기÷장기</td><td><b>${f2(c.sl)}</b></td></tr>
       <tr><td colspan="2" class="dim" style="padding-top:6px">서울 427개 행정동 분포에 넣으면</td></tr>
       <tr><td>외국인 비중</td><td>${c.rank_fo}위 수준 <span class="dim">(상위 ${c.pct_fo}%)</span></td></tr>
-      <tr><td>단기비</td><td>${c.rank_sr}위 수준 <span class="dim">(상위 ${c.pct_sr}%)</span></td></tr>
-      ${c.prev ? `<tr><td colspan="2" class="dim" style="padding-top:6px">축소 전 ${c.prev.ngrid}격자:
-        외국인 ${c.prev.fo}% · 단기비 ${c.prev.sr} · ${c.prev.rank_fo}위</td></tr>` : ""}
+      <tr><td>단기÷장기</td><td>${c.rank_sl}위 수준 <span class="dim">(상위 ${c.pct_sl}%)</span></td></tr>
     </tbody></table>
     <div class="dim" style="margin-top:7px">묶음은 격자 집합이고 비교 대상은 행정동이다. 단위가 달라 체감용이다.</div>`;
 }

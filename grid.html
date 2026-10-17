@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>격자 분석</title>
-<link rel="stylesheet" href="css/grid.css?v=0.1.0">
+<link rel="stylesheet" href="css/grid.css?v=0.2.0">
 <script>
-  window.APP_VERSION = "0.1.0";
+  window.APP_VERSION = "0.2.0";
   function showFatal(msg) {
     var el = document.getElementById("fatal");
     if (!el) { el = document.createElement("div"); el.id = "fatal"; document.documentElement.appendChild(el); }
@@ -42,14 +42,14 @@
     <table id="ztab"><thead><tr>
       <th>구역</th><th>격자</th>
       <th>외국인%<br><em>(장+단)/전체</em></th>
-      <th>단기비<br><em>단/(장+단)</em></th>
+      <th>단기÷장기<br><em>단/장</em></th>
     </tr></thead><tbody></tbody></table>
 
     <h2>행정동 서울 순위 <em>427개 중</em></h2>
     <table id="dtab"><thead><tr>
       <th>행정동</th>
       <th>외국인%</th><th>순위</th>
-      <th>단기비</th><th>순위</th>
+      <th>단기÷장기</th><th>순위</th>
     </tr></thead><tbody></tbody></table>
 
     <h2>선택 상세</h2>
@@ -62,6 +62,6 @@
 <div id="error"></div>
 
 <script src="js/common.js?v=0.22.0"></script>
-<script src="js/grid.js?v=0.1.0"></script>
+<script src="js/grid.js?v=0.2.0"></script>
 </body>
 </html>
