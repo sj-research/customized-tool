@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>격자 분석</title>
+<link rel="stylesheet" href="css/grid.css?v=0.1.0">
+<script>
+  window.APP_VERSION = "0.1.0";
+  function showFatal(msg) {
+    var el = document.getElementById("fatal");
+    if (!el) { el = document.createElement("div"); el.id = "fatal"; document.documentElement.appendChild(el); }
+    el.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99;background:#b3261e;color:#fff;padding:10px;font:13px/1.4 sans-serif;white-space:pre-wrap";
+    el.textContent = "오류 (v" + window.APP_VERSION + "): " + msg;
+  }
+  window.addEventListener("error", function (e) { showFatal(e.message + (e.filename ? "\n" + e.filename.split("/").pop() + ":" + e.lineno : "")); });
+  window.addEventListener("unhandledrejection", function (e) { showFatal(String(e.reason && e.reason.message || e.reason)); });
+</script>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="bar">
+  <span class="title">격자 분석</span>
+  <div class="tabs" id="layers">
+    <button data-layer="zones" class="on">zones</button>
+    <button data-layer="grids" class="on">격자</button>
+    <button data-layer="dongs">행정동</button>
+    <button data-layer="clusters">묶음</button>
+    <button data-layer="labels" class="on">라벨</button>
+  </div>
+  <div class="views">
+    <button data-view="all">전체</button>
+    <button data-view="ddm">동대문</button>
+    <button data-view="sin">신설동</button>
+  </div>
+</div>
+
+<div id="panel">
+  <div class="pz">
+    <h2>구역별 외국인 비중</h2>
+    <table id="ztab"><thead><tr>
+      <th>구역</th><th>격자</th>
+      <th>외국인%<br><em>(장+단)/전체</em></th>
+      <th>단기비<br><em>단/(장+단)</em></th>
+    </tr></thead><tbody></tbody></table>
+
+    <h2>행정동 서울 순위 <em>427개 중</em></h2>
+    <table id="dtab"><thead><tr>
+      <th>행정동</th>
+      <th>외국인%</th><th>순위</th>
+      <th>단기비</th><th>순위</th>
+    </tr></thead><tbody></tbody></table>
+
+    <h2>선택 상세</h2>
+    <div id="pick" class="dim">지도에서 격자나 행정동, 묶음을 눌러라.</div>
+    <p class="foot" id="meta"></p>
+  </div>
+</div>
+
+<button id="toggle" title="패널 접기">▸</button>
+<div id="error"></div>
+
+<script src="js/common.js?v=0.22.0"></script>
+<script src="js/grid.js?v=0.1.0"></script>
+</body>
+</html>
