@@ -2,7 +2,7 @@
 // 세 시점을 같은 중심과 같은 축척으로 보여 주고, 탭만 바꿔 가며 캡처하면 3장이 그대로 맞는다.
 // 구역 자료는 data/zone-versions.json에 박아 두었다. 업장 점만 시트에서 받는다.
 
-const VIEW = { lat: 37.5715, lng: 127.0150, level: 6 };   // 세 시점 공통 화면
+// 세 시점 폴리곤 전체를 감싸는 범위로 맞춘다. 셋 다 같은 화면이라 캡처하면 그대로 겹친다
 const STATIONS = [
   { name: "동대문역사문화공원역", lat: 37.56566, lng: 127.00900 },
   { name: "동대문역", lat: 37.57167, lng: 127.01063 },
@@ -17,16 +17,23 @@ const layers = { polys: [], labels: [], dots: [] };
 const fail = html => { $("error").style.display = "block"; $("error").innerHTML = html; };
 const clear = k => { layers[k].forEach(o => o.setMap(null)); layers[k] = []; };
 
+function allBounds() {
+  const b = new kakao.maps.LatLngBounds();
+  data.versions.forEach(v => v.zones.forEach(z => z.rings.forEach(r =>
+    r.forEach(([x, y]) => b.extend(new kakao.maps.LatLng(y, x))))));
+  return b;
+}
+
 function setView() {
   map.relayout();
-  map.setLevel(VIEW.level);
-  map.setCenter(new kakao.maps.LatLng(VIEW.lat, VIEW.lng));
+  map.setBounds(allBounds(), 70, 70, 110, 70);   // 아래는 수치 띠를 피해 더 띄운다
 }
 
 function initMap() {
-  map = new kakao.maps.Map($("map"), { center: new kakao.maps.LatLng(VIEW.lat, VIEW.lng), level: VIEW.level });
+  map = new kakao.maps.Map($("map"), { center: new kakao.maps.LatLng(37.5715, 127.015), level: 5 });
+  window.__prep = { map, setView, render };   // 캡처할 때 밖에서 부르려고 열어 둔다
   // 창이 가려진 채 열리면 지도 크기가 0으로 잡혀 위치가 어긋난다
-  new ResizeObserver(() => { if (!homed && $("map").clientWidth) { setView(); homed = true; } else map.relayout(); })
+  new ResizeObserver(() => { if ($("map").clientWidth) { setView(); homed = true; } })
     .observe($("map"));
   STATIONS.forEach(s => new kakao.maps.CustomOverlay({
     map, position: new kakao.maps.LatLng(s.lat, s.lng), yAnchor: 1.6, zIndex: 6,
@@ -64,7 +71,7 @@ function render(key) {
     const [la, ln] = center(z.rings);
     layers.labels.push(new kakao.maps.CustomOverlay({
       map, position: new kakao.maps.LatLng(la, ln), zIndex: 7,
-      content: `<div class="zlabel" style="border-color:${z.color};color:${z.color}">${esc(z.name)}</div>`,
+      content: `<div class="zlabel" style="border-color:${z.color};color:${z.color}">${esc(z.id)}</div>`,
     }));
   });
   $("legend").innerHTML = v.zones.map(z =>
