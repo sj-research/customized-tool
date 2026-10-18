@@ -3,12 +3,13 @@
 // 카카오 JS 키는 common.js 의 Store 에서 읽는다. 저장소에 넣지 않는다.
 
 const VIEWS = { all: [37.5712, 127.0165, 5], ddm: [37.5690, 127.0092, 4], sin: [37.5752, 127.0245, 3] };
+// 구역은 2026-10-18 2차 재구성. D1~D4, S1 다섯 개다.
+// 옛 D4가 새 D1, 옛 D6이 새 D2, 옛 D1이 새 D3, 옛 D3이 새 D4다. 색을 따라 옮겼다.
 const ZONE_COLOR = {
-  D1: "#c1121f", D2: "#e36414", D3: "#0f7173", D4: "#5f0f40",
-  D5: "#9a6700", D6: "#1d3557", S1: "#6a4c93", S2: "#2a9d8f",
+  D1: "#5f0f40", D2: "#1d3557", D3: "#c1121f", D4: "#0f7173", S1: "#6a4c93",
 };
 const DONG_COLOR = ["#e76f51", "#2a9d8f", "#264653", "#e9c46a", "#8ab17d", "#f4a261", "#6d597a", "#355070"];
-const ZONE_ORDER = ["D6", "D3", "D5", "D4", "S1", "D2", "S2", "D1"];
+const ZONE_ORDER = ["D2", "D4", "D1", "S1", "D3"];   // 외국인 비중 내림차순
 
 const $ = id => document.getElementById(id);
 const f1 = v => (v == null ? "-" : Number(v).toFixed(1));
@@ -180,10 +181,10 @@ function buildTables() {
   const Z = D.zonestat || {};
   $("ztab").querySelector("tbody").innerHTML = ZONE_ORDER.filter(z => Z[z]).map(z => {
     const r = Z[z];
-    return `<tr data-z="${z}"><td><span class="sw" style="display:inline-block;background:${ZONE_COLOR[z]};margin-right:4px"></span>${z}</td>
-      <td>${r.ngrid}</td><td>${f2(r.fo)}%</td><td>${f2(r.sl)}</td></tr>`;
+    return `<tr data-z="${z}" title="${r.name}"><td><span class="sw" style="display:inline-block;background:${ZONE_COLOR[z]};margin-right:4px"></span>${z}</td>
+      <td>${r.ngrid}</td><td>${f2(r.fo)}%</td><td>${f2(r.sl)}</td><td>${f2(r.dawn)}</td></tr>`;
   }).join("") + Object.entries(D.clusters || {}).map(([nm, c]) =>
-    `<tr class="sum"><td>${nm}</td><td>${c.ngrid}</td><td>${f2(c.fo)}%</td><td>${f2(c.sl)}</td></tr>`).join("");
+    `<tr class="sum"><td>${nm}</td><td>${c.ngrid}</td><td>${f2(c.fo)}%</td><td>${f2(c.sl)}</td><td>-</td></tr>`).join("");
 
   const S = D.dongstat || {};
   $("dtab").querySelector("tbody").innerHTML = Object.keys(S).sort((a, b) => S[b].fo - S[a].fo).map(d => {
