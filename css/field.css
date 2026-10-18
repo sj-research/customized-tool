@@ -190,3 +190,6 @@ h3 { margin: 0; font-size: 18px; }
   border-radius: 7px; padding: 7px 10px; font-size: 13px; }
 .mk.dim { opacity: .22; }
 .mk.hl { box-shadow: 0 0 0 4px rgba(255,255,255,.95), 0 0 0 7px #1f3a5f; z-index: 5; }
+
+/* 구역 밖(기타) 칩. 조사 대상이 아니라 흐리게 (10월 18일) */
+.cnt.etc { color: #8a8f98; }

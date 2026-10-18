@@ -25,7 +25,7 @@ const STATUS_BUTTONS = ["미조사", "완료", "재방문", "제외"];          
 const STATUS_COLOR = { "미조사": "#e8590c", "완료": "#2b8a3e", "관리": "#1864ab", "재방문": "#c2255c", "제외": "#868e96" };
 const BEES_COLOR = "#f1c40f";   // Bees 인덱스 색 (9월 21일 결정)
 const REVISIT_REASONS = ["키맨 부재", "브레이크 타임", "영업 전", "기타"];
-const LIST_INDEXES = ["완료", "관리", "재방문"];   // 카운트를 눌러 목록을 여는 index. 미조사와 제외는 목록을 열지 않는다
+const LIST_INDEXES = ["완료", "관리", "재방문"];   // 카운트를 눌러 목록을 여는 index. 미조사와 제외는 목록을 열지 않는다 (기타는 따로 연다)
 
 const $ = id => document.getElementById(id);
 const fixtureMode = !!new URLSearchParams(location.search).get("fixture");
@@ -154,23 +154,30 @@ function saveMapCache(fetchedAt) {
 
 /* ---------------- 상단 카운트 ---------------- */
 
+// 상단 숫자는 구역에 든 업장만 센다. 구역 밖(기타)은 조사 대상이 아니라 끝에 따로 보여 준다 (10월 18일)
+const inZone = p => !!String(p.zone_id || "").trim();
+
 function renderCounts() {
-  const counts = countBy(state.places.map(p => ({ s: appStatus(p) })), "s");
+  const mine = state.places.filter(inZone);
+  const etc = state.places.length - mine.length;
+  const counts = countBy(mine.map(p => ({ s: appStatus(p) })), "s");
   $("counts").innerHTML = STATUS_ORDER.map(s => {
     const on = LIST_INDEXES.includes(s);
     return `<span class="cnt${on ? " tap" : ""}"${on ? ` data-list="${s}"` : ""}><i style="background:${STATUS_COLOR[s]}"></i>${s} <b>${counts[s] || 0}</b></span>`;
-  }).join("") + beesCount();
+  }).join("") + (etc ? `<span class="cnt etc tap" data-list="기타"><i style="background:#c3c7cc"></i>기타 <b>${etc}</b></span>` : "")
+    + beesCount();
   $("counts").querySelectorAll("[data-list]").forEach(el => el.onclick = () => openIndexList(el.dataset.list, el.dataset.bees === "1"));
 }
 
 // Bees는 위 상태 숫자에도 함께 세고, 미조사와 관리와 재방문 수를 둘째 줄에 따로 보여준다
+// Bees도 구역에 든 곳만 센다. 재방문은 거의 비어 있어 제외로 바꿨다 (10월 18일)
 function beesCount() {
-  const bees = state.places.filter(p => p.bees);
+  const bees = state.places.filter(p => p.bees && inZone(p));
   if (!bees.length) return "";
   const n = s => bees.filter(p => appStatus(p) === s).length;
   const chip = (s, color, label) => `<span class="cnt bees tap" data-list="${s}" data-bees="1"><i style="background:${color}"></i>${label} <b>${n(s)}</b></span>`;
   return `<span class="bees-row">${chip("미조사", BEES_COLOR, "Bees 미조사")}${chip("관리", STATUS_COLOR["관리"], "Bees 관리")}` +
-    `${chip("재방문", STATUS_COLOR["재방문"], "Bees 재방문")}</span>`;
+    `${chip("제외", STATUS_COLOR["제외"], "Bees 제외")}</span>`;
 }
 
 /* ---------------- 지도 ---------------- */
@@ -923,8 +930,9 @@ function focusPlace(placeId) {
 
 // 카운트를 누르면 그 index에 드는 업장만 목록으로 보여준다. 누르면 지도에서 그 업장으로 간다
 function openIndexList(key, beesOnly) {
+  const match = key === "기타" ? (p => !inZone(p)) : (p => inZone(p) && appStatus(p) === key);
   const rows = state.places
-    .filter(p => appStatus(p) === key && (!beesOnly || p.bees))
+    .filter(p => match(p) && (!beesOnly || p.bees))
     .map(p => ({ ...p, zone: zoneName(p) }))
     .sort((a, b) => String(a.zone).localeCompare(String(b.zone)) || String(a.displayName).localeCompare(String(b.displayName)));
   $("listTitle").textContent = `${beesOnly ? "Bees " : ""}${key}`;
