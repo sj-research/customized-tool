@@ -33,10 +33,10 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.20";
+const API_VERSION = "0.21";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
-const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
+const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전", "segmentation"];
 const TIMEZONE = "Asia/Seoul";
 
 /** 브라우저로 주소를 열었을 때 확인용. 데이터는 돌려주지 않는다 */
@@ -109,6 +109,8 @@ function doPost(e) {
         return json_(withLock_(() => setZoneIds_(req)));
       case "ensureStreetColumn":
         return json_(withLock_(() => ensureStreetColumn_()));
+      case "ensureSegmentationZone":
+        return json_(withLock_(() => ensureSegmentationZone_()));
       default:
         return json_({ ok: false, error: "unknown_action" });
     }
@@ -714,6 +716,41 @@ function ensureStreetColumn_() {
     'IFERROR(REGEXEXTRACT(' + a + '2:' + a + ',"^\\S+\\s+\\S+\\s+(\\S+)"),"")))}';
   sheet.getRange(1, r.col).setFormula(formula);
   return { ok: true, column: r.col, added: r.added, formula: formula };
+}
+
+/**
+ * segmentation 탭에 place_id와 zone_id 열을 수식으로 만든다 (10월 18일 추가).
+ * segmentation은 POC 명과 주소로만 places와 이어져 있어 구역을 알 수 없었다.
+ * 상호명과 주소가 모두 같은 행을 먼저 찾고, 없으면 상호명만으로 찾는다. 251행 전부 연결되는 것을 확인했다
+ * 값이 아니라 수식이라 행을 더해도 따라온다
+ */
+function ensureSegmentationZone_() {
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheetByName("segmentation");
+  if (!sheet) throw new InputError("segmentation 탭이 없습니다");
+  const places = ss.getSheetByName("places");
+  const nameCol = columnLetter_(headerIndex_(sheet, "POC 명"));
+  const addrCol = columnLetter_(headerIndex_(sheet, "주소"));
+  if (!nameCol || !addrCol) throw new InputError("segmentation 탭에 POC 명 또는 주소 컬럼이 없습니다");
+  const pId = columnLetter_(headerIndex_(places, "place_id"));
+  const pZone = columnLetter_(headerIndex_(places, "zone_id"));
+  const pName = columnLetter_(headerIndex_(places, "상호명"));
+  const pAddr = columnLetter_(headerIndex_(places, "주소"));
+
+  const a = addHeaderColumn_(sheet, "place_id");
+  const key = `${nameCol}2:${nameCol}&"|"&${addrCol}2:${addrCol}`;
+  const table = `{places!$${pName}:$${pName}&"|"&places!$${pAddr}:$${pAddr}, places!$${pId}:$${pId}}`;
+  sheet.getRange(1, a.col).setFormula(
+    `={"place_id";ARRAYFORMULA(IF(${nameCol}2:${nameCol}="","",` +
+    `IFERROR(VLOOKUP(${key}, ${table}, 2, FALSE),` +
+    `IFERROR(VLOOKUP(${nameCol}2:${nameCol}, {places!$${pName}:$${pName}, places!$${pId}:$${pId}}, 2, FALSE),""))))}`);
+
+  const b = addHeaderColumn_(sheet, "zone_id");
+  const idCol = columnLetter_(a.col);
+  sheet.getRange(1, b.col).setFormula(
+    `={"zone_id";ARRAYFORMULA(IF(${idCol}2:${idCol}="","",` +
+    `IFERROR(VLOOKUP(${idCol}2:${idCol}, {places!$${pId}:$${pId}, places!$${pZone}:$${pZone}}, 2, FALSE),"")))}`);
+  return { ok: true, placeIdCol: a.col, zoneIdCol: b.col, added: [a.added, b.added] };
 }
 
 /** 1 -> A, 27 -> AA */
