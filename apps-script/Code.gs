@@ -33,7 +33,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.21";
+const API_VERSION = "0.22";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전", "segmentation"];
@@ -91,6 +91,8 @@ function doPost(e) {
         return json_(withLock_(() => setStatus_(req)));
       case "setManage":
         return json_(withLock_(() => setManage_(req)));
+      case "setBeesExact":
+        return json_(withLock_(() => setBeesExact_(req)));
       case "addPlace":
         return json_(withLock_(() => addPlace_(req)));
       case "setBees":
@@ -933,6 +935,31 @@ const PLACE_TAG_HEADER = "TOBE 태그";
 // 구역으로 나누지 않고 업장 표시(세모 세 가지 색)로만 구분하는 묶음.
 // 풍물시장 푸드코트는 10월 18일 zones 2차 재구성에서 구역(옛 S2)을 없애고 태그로 바꾼 것이다
 const PLACE_TAGS = ["감성 맛집", "오래된 로컬", "풍물시장 푸드코트"];
+
+/**
+ * BEES 체크를 목록대로 정확히 맞춘다 (10월 18일 추가).
+ * setBees_는 새 업장을 더하면서 켜기만 해서 목록에서 빠진 곳을 끄지 못한다.
+ * 목록을 다시 받을 때마다 이 함수로 열 전체를 맞춘다. setManage_와 같은 방식이고 빈 목록은 막는다
+ */
+function setBeesExact_(req) {
+  const items = Array.isArray(req.items) ? req.items : [];
+  if (!items.length && req.clearAll !== true) {
+    throw new InputError("items가 비어 있습니다. BEES를 모두 끄려면 clearAll을 true로 보내세요");
+  }
+  if (items.length > 500) throw new InputError("items는 500건 이하여야 합니다");
+  const want = items.map(id => String(id || "").trim());
+  if (want.some(id => !id)) throw new InputError("place_id가 비어 있습니다");
+  ensurePlaceColumns_();
+  const sheet = SpreadsheetApp.getActive().getSheetByName("places");
+  const col = addHeaderColumn_(sheet, "BEES").col;
+  const ids = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 1), 1).getValues().map(r => String(r[0]).trim());
+  const unknown = want.filter(id => ids.indexOf(id) < 0);
+  if (unknown.length) throw new InputError(`places에 없는 place_id: ${unknown.join(", ")}`);
+  const before = sheet.getRange(2, col, ids.length, 1).getValues().map(r => r[0] === true);
+  const next = ids.map(id => [want.indexOf(id) >= 0]);
+  sheet.getRange(2, col, ids.length, 1).setValues(next);
+  return { ok: true, bees: want.length, changed: next.filter((r, i) => r[0] !== before[i]).length };
+}
 
 /** 관리 체크를 목록대로 맞춘다. 목록에 없는 업장은 끈다 */
 function setManage_(req) {

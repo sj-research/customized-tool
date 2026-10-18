@@ -154,12 +154,21 @@ function saveMapCache(fetchedAt) {
 
 /* ---------------- 상단 카운트 ---------------- */
 
-// 상단 숫자는 구역에 든 업장만 센다. 구역 밖(기타)은 조사 대상이 아니라 끝에 따로 보여 준다 (10월 18일)
+// 상단 숫자는 구역에 든 업장만 센다 (10월 18일)
 const inZone = p => !!String(p.zone_id || "").trim();
+
+// 지도 보기 두 가지 (10월 18일)
+//   v2 담당 구역만 (기본): 구역 밖은 지도에서 빼고, 옛 D2 상가와 D5 10번 출구 쪽 10곳만 남긴다
+//   v1 전체 보기: 구역 밖까지 모두 보여 주고 상단에 "기타" 수도 띄운다
+const VIEW_KEY = "cet.mapView";
+const ETC_KEEP = ["P032", "P186", "P183", "P188", "P184", "P181",   // 옛 D2 마장로1길 상가 6곳
+                  "P291", "P289", "P303", "P293"];                  // 옛 D5 동대문역 10번 출구 쪽 4곳
+const mapView = () => (Store.get(VIEW_KEY) === "v1" ? "v1" : "v2");
+const onMap = p => mapView() === "v1" || inZone(p) || ETC_KEEP.includes(p.place_id);
 
 function renderCounts() {
   const mine = state.places.filter(inZone);
-  const etc = state.places.length - mine.length;
+  const etc = mapView() === "v1" ? state.places.length - mine.length : 0;
   const counts = countBy(mine.map(p => ({ s: appStatus(p) })), "s");
   $("counts").innerHTML = STATUS_ORDER.map(s => {
     const on = LIST_INDEXES.includes(s);
@@ -340,7 +349,7 @@ function openZoneList(z, key) {
 function rebuildMarkers() {
   Object.values(state.overlays).forEach(o => o.overlay.setMap(null));
   state.overlays = {};
-  state.places.forEach(addMarker);
+  state.places.filter(onMap).forEach(addMarker);
   updateMarkerVisibility();
 }
 
@@ -976,11 +985,24 @@ function openList() {
 
 /* ---------------- 설정, 알림, 시작 ---------------- */
 
+const VIEW_HELP = {
+  v2: "구역 밖 업장은 지도에서 빼고, 옛 D2 상가와 D5 10번 출구 쪽 10곳만 남깁니다.",
+  v1: "구역 밖까지 모두 보여 주고 상단에 기타 수도 띄웁니다.",
+};
+
 function openSettings(message) {
   const s = Store.settings();
   $("setUrl").value = s.url;
   $("setToken").value = s.token;
   $("setKakao").value = s.kakao;
+  $("setView").value = mapView();
+  $("viewHelp").textContent = VIEW_HELP[mapView()];
+  $("setView").onchange = () => {
+    Store.set(VIEW_KEY, $("setView").value);
+    $("viewHelp").textContent = VIEW_HELP[mapView()];
+    rebuildMarkers();
+    renderCounts();
+  };
   $("settingsMsg").textContent = message || "";
   $("settings").hidden = false;
 }
