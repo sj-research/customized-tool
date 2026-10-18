@@ -24,11 +24,7 @@ body.survey #counts { display: flex; flex-wrap: wrap; }
   padding: 10px 12px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.25); font-size: 12px; line-height: 1.7; }
 .chip { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; }
 .lg-dot { display: inline-block; width: 12px; height: 12px; vertical-align: middle; border-radius: 50%; }
-.lg-sq { display: inline-block; width: 12px; height: 12px; vertical-align: middle; border-radius: 2px; border: 3px solid #6b3e00; }
-.lg-sq.gray { border-color: #8a8f98; }
-.lg-tri { display: inline-block; width: 14px; height: 13px; vertical-align: middle;
-  background: no-repeat center / 100% 100% url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpolygon points='50,4 97,96 3,96' fill='none' stroke='%23e6007e' stroke-width='8' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-.lg-tri.gray { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpolygon points='50,4 97,96 3,96' fill='none' stroke='%238a8f98' stroke-width='8' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
 
 /* Zones 모드 점. 구역 색으로 칠한다 */
 .dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #fff;
@@ -39,14 +35,16 @@ body.survey #counts { display: flex; flex-wrap: wrap; }
   box-shadow: 0 1px 3px rgba(0,0,0,.45); cursor: pointer; }
 .mk.bees { width: 17px; height: 17px; border: 3px dashed #1f3a5f; }
 
-/* 신설동 S3 감성 맛집은 세모, S4 오래된 로컬 맛집은 네모. Zones 모드는 구역 색, 조사 현황은 회색 */
-.dot.t-sq, .dot.t-tri, .mk.t-sq, .mk.t-tri { position: relative; }
-.dot.t-sq::after { content: ""; position: absolute; inset: -6px; border: 3px solid #6b3e00; border-radius: 2px; pointer-events: none; }
-.dot.t-tri::after { content: ""; position: absolute; left: -90%; right: -90%; top: -125%; bottom: -60%; pointer-events: none;
-  background: no-repeat center / 100% 100% url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpolygon points='50,4 97,96 3,96' fill='none' stroke='%23e6007e' stroke-width='8' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-.mk.t-sq::after { content: ""; position: absolute; inset: -7px; border: 2.5px solid #8a8f98; border-radius: 2px; pointer-events: none; }
-.mk.t-tri::after { content: ""; position: absolute; left: -70%; right: -70%; top: -95%; bottom: -45%; pointer-events: none;
-  background: no-repeat center / 100% 100% url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpolygon points='50,4 97,96 3,96' fill='none' stroke='%238a8f98' stroke-width='8' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+/* 구역으로 나누지 않고 업장 표시로만 구분하는 묶음. 세모 세 가지 색 (10월 18일 2차 재구성) */
+.dot.tg, .mk.tg { position: relative; overflow: visible; }
+.dot.tg::after { content: ""; position: absolute; left: -90%; right: -90%; top: -125%; bottom: -60%;
+  pointer-events: none; background: no-repeat center / 100% 100%; }
+.mk.tg::after { content: ""; position: absolute; left: -70%; right: -70%; top: -95%; bottom: -45%;
+  pointer-events: none; background: no-repeat center / 100% 100%; }
+.dot.tg1::after, .mk.tg1::after { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpolygon points='50,4 97,96 3,96' fill='none' stroke='%23e6007e' stroke-width='8' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.dot.tg2::after, .mk.tg2::after { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpolygon points='50,4 97,96 3,96' fill='none' stroke='%236b3e00' stroke-width='8' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.dot.tg3::after, .mk.tg3::after { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpolygon points='50,4 97,96 3,96' fill='none' stroke='%23c9a100' stroke-width='8' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
 
 .zlabel { padding: 3px 8px; border-radius: 12px; background: rgba(255,255,255,.92); border: 2px solid;
   font-size: 12px; font-weight: 700; white-space: nowrap; }
@@ -63,3 +61,5 @@ body.survey #counts { display: flex; flex-wrap: wrap; }
 #error { position: absolute; top: 60px; left: 10px; right: 10px; z-index: 11; padding: 10px 12px;
   border-radius: 8px; background: #b3261e; color: #fff; display: none; line-height: 1.6; }
 #error a { color: #fff; }
+/* 범례 세모. 색은 인라인 SVG가 들고 있다 */
+.lg-tri { width: 13px; height: 12px; vertical-align: middle; }

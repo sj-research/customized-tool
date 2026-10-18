@@ -18,6 +18,8 @@ const APP_TO_SHEET = { "미조사": "미방문", "완료": "관측완료", "재�
 // 조사 대상에서 아예 뺀 행. 지도, 카운트, 목록, 검색 어디에도 넣지 않는다 (10월 11일 결정)
 // "제외"는 명단에 있었는데 어떻게 처리할지 정한 결과이고, "삭제"는 조사 자체를 하지 않는다는 뜻이다
 const HIDDEN_STATUS = ["삭제"];
+// TOBE 태그 세 가지를 세모 색으로 구분한다. 구역이 아니라 업장 표시다
+const TAG_CLASS = { "감성 맛집": "tg1", "오래된 로컬": "tg2", "풍물시장 푸드코트": "tg3" };
 const STATUS_ORDER = ["미조사", "완료", "관리", "재방문", "제외"];   // 화면 표시용. 관리는 완료 중 관리 체크한 곳
 const STATUS_BUTTONS = ["미조사", "완료", "재방문", "제외"];          // 하단 시트 버튼. 관리는 완료 저장 때 체크로 정한다
 const STATUS_COLOR = { "미조사": "#e8590c", "완료": "#2b8a3e", "관리": "#1864ab", "재방문": "#c2255c", "제외": "#868e96" };
@@ -353,9 +355,10 @@ function paintMarker(placeId) {
   if (!o || !p) return;
   // Bees는 점선 테두리. 방문 전에는 미조사 색 대신 Bees 색(노랑)으로 둔다
   o.el.classList.toggle("bees", p.bees);
-  // 신설동 S3 감성 맛집은 회색 세모, S4 오래된 로컬 맛집은 회색 네모 테두리 (폴리곤 없이 업장으로 정의한 구역)
-  o.el.classList.toggle("t-tri", p["TOBE 태그"] === "감성 맛집");
-  o.el.classList.toggle("t-sq", p["TOBE 태그"] === "오래된 로컬");
+  // 구역으로 나누지 않고 업장 표시로만 구분하는 묶음. 세모 세 가지 색 (10월 18일 2차 재구성)
+  const tg = TAG_CLASS[p["TOBE 태그"]];
+  o.el.classList.toggle("tg", !!tg);
+  Object.values(TAG_CLASS).forEach(c => o.el.classList.toggle(c, c === tg));
   o.el.style.background = p.bees && appStatus(p) === "미조사" ? BEES_COLOR : STATUS_COLOR[appStatus(p)];   // 방문 전 Bees만 노란색, 관리는 파란색
   o.el.classList.toggle("selected", state.selected === placeId);
   o.el.classList.toggle("pending", !!state.pending[placeId]);

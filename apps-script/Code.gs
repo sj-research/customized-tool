@@ -33,7 +33,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.19";
+const API_VERSION = "0.20";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전"];
@@ -893,7 +893,9 @@ function setZonesTobe_(req) {
 
 // 신설동 S3, S4처럼 폴리곤 없이 업장으로 정의한 TOBE 구역 표시
 const PLACE_TAG_HEADER = "TOBE 태그";
-const PLACE_TAGS = ["감성 맛집", "오래된 로컬"];
+// 구역으로 나누지 않고 업장 표시(세모 세 가지 색)로만 구분하는 묶음.
+// 풍물시장 푸드코트는 10월 18일 zones 2차 재구성에서 구역(옛 S2)을 없애고 태그로 바꾼 것이다
+const PLACE_TAGS = ["감성 맛집", "오래된 로컬", "풍물시장 푸드코트"];
 
 /** 관리 체크를 목록대로 맞춘다. 목록에 없는 업장은 끈다 */
 function setManage_(req) {

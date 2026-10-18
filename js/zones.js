@@ -11,11 +11,11 @@ const STATIONS = [
 const VIEWS = { all: [37.5712, 127.0165, 5], ddm: [37.5690, 127.0092, 4], sin: [37.5752, 127.0245, 3] };
 // 구역 색은 데이터가 아니라 화면 설정이라 여기에 둔다 (시트 zones 탭에는 색 칸이 없다)
 const ZONE_COLOR = {
-  D1: "#e6194b", D2: "#f58231", D3: "#9a6324", D4: "#4363d8", D5: "#0fa3b1", D6: "#f032e6",
-  S1: "#1f3a5f", S2: "#c9a100", S3: "#e6007e", S4: "#6b3e00",
+  D1: "#4363d8", D2: "#f032e6", D3: "#e6194b", D4: "#9a6324", S1: "#1f3a5f",
 };
-// 신설동 S3, S4는 폴리곤 없이 업장 표시로 정의한다
-const TAG_ZONE = { "감성 맛집": "S3", "오래된 로컬": "S4" };
+// 구역으로 나누지 않고 업장 표시로만 구분하는 묶음. 세모 세 가지 색 (10월 18일 2차 재구성)
+const TAG_CLASS = { "감성 맛집": "tg1", "오래된 로컬": "tg2", "풍물시장 푸드코트": "tg3" };
+const TAG_COLOR = { "감성 맛집": "#e6007e", "오래된 로컬": "#6b3e00", "풍물시장 푸드코트": "#c9a100" };
 // 현장 지도(field.js)와 같은 진행상태 색과 매핑
 const STATUS_ORDER = ["미조사", "완료", "관리", "재방문", "제외"];
 const STATUS_COLOR = { "미조사": "#e8590c", "완료": "#2b8a3e", "관리": "#1864ab", "재방문": "#c2255c", "제외": "#868e96" };
@@ -73,10 +73,11 @@ function inRing(x, y, ring) {
 }
 
 function zoneOf(p) {
-  if (p._tag && TAG_ZONE[p._tag]) return TAG_ZONE[p._tag];
   const f = zoneFeatures.find(f => inRing(+p.lng, +p.lat, f.ring));
   return f ? f.zone_id : "";
 }
+// 태그는 구역과 따로다. 점 바깥에 세모를 둘러 구분한다
+const tagClass = p => (p._tag && TAG_CLASS[p._tag] ? " tg " + TAG_CLASS[p._tag] : "");
 
 /* ---------------- 말풍선 ---------------- */
 
@@ -116,7 +117,6 @@ function drawPolygons(colored) {
 function drawLabels(list, colored) {
   clear("labels");
   ZONES.forEach(z => {
-    if (Object.values(TAG_ZONE).includes(z.zone_id)) return;
     const mine = list.filter(p => p._zone === z.zone_id);
     let x, y;
     if (mine.length) {
@@ -145,7 +145,7 @@ function renderZones() {
     p._zone = zoneOf(p);
     counts[p._zone] = (counts[p._zone] || 0) + 1;
     const el = document.createElement("div");
-    el.className = "dot" + (p._zone ? "" : " none") + (p._tag ? (p._tag === "감성 맛집" ? " t-tri" : " t-sq") : "");
+    el.className = "dot" + (p._zone ? "" : " none") + tagClass(p);
     if (p._zone) el.style.background = ZONE_COLOR[p._zone] || GRAY;
     el.onclick = () => showInfo(p);
     layers.dots.push(new kakao.maps.CustomOverlay({
@@ -153,12 +153,10 @@ function renderZones() {
     }));
   });
   drawLabels(places, true);
-  $("legend").innerHTML = ZONES.filter(z => counts[z.zone_id]).map(z => {
-    const mark = z.zone_id === "S3" ? `<span class="lg-tri"></span>`
-      : z.zone_id === "S4" ? `<span class="lg-sq"></span>`
-      : `<span class="chip" style="background:${ZONE_COLOR[z.zone_id] || GRAY}"></span>`;
-    return `<div>${mark} ${esc(z["구역명"])} <b>${counts[z.zone_id]}</b></div>`;
-  }).join("") + stamp();
+  $("legend").innerHTML = ZONES.filter(z => counts[z.zone_id]).map(z =>
+    `<div><span class="chip" style="background:${ZONE_COLOR[z.zone_id] || GRAY}"></span> ${esc(z["구역명"])} <b>${counts[z.zone_id]}</b></div>`
+  ).join("") + `<div>${counts[""] ? `<span class="chip" style="background:#bbb"></span> 기타 <b>${counts[""]}</b>` : ""}</div>`
+    + tagLegend() + stamp();
 }
 
 function renderSurvey() {
@@ -171,7 +169,7 @@ function renderSurvey() {
     counts[st] = (counts[st] || 0) + 1;
     const bees = isChecked(p["BEES"]);
     const el = document.createElement("div");
-    el.className = "mk" + (bees ? " bees" : "") + (p._tag ? (p._tag === "감성 맛집" ? " t-tri" : " t-sq") : "");
+    el.className = "mk" + (bees ? " bees" : "") + tagClass(p);
     el.style.background = bees && st === "미조사" ? BEES_COLOR : STATUS_COLOR[st];
     el.onclick = () => showInfo(p);
     layers.marks.push(new kakao.maps.CustomOverlay({
@@ -188,8 +186,17 @@ function renderSurvey() {
   $("legend").innerHTML = STATUS_ORDER.map(s => `<div><span class="lg-dot" style="background:${STATUS_COLOR[s]}"></span> ${s}</div>`).join("")
     + `<div><span class="lg-dot" style="background:${BEES_COLOR};border:2px dashed #1f3a5f"></span> Bees 미조사</div>`
     + `<div><span class="lg-dot" style="background:${STATUS_COLOR["관리"]};border:2px dashed #1f3a5f"></span> Bees 관리</div>`
-    + `<div><span class="lg-tri gray"></span> 신설동 감성 맛집</div>`
-    + `<div><span class="lg-sq gray"></span> 신설동 오래된 로컬 맛집</div>` + stamp();
+    + tagLegend() + stamp();
+}
+
+// 태그 범례. 세모 세 가지 색
+function tagLegend() {
+  return Object.keys(TAG_COLOR).map(t => {
+    const n = places.filter(p => p._tag === t).length;
+    const tri = `<svg class="lg-tri" viewBox="0 0 100 100"><polygon points="50,6 95,94 5,94" fill="none" `
+      + `stroke="${TAG_COLOR[t]}" stroke-width="9" stroke-linejoin="round"/></svg>`;
+    return n ? `<div>${tri} ${esc(t)} <b>${n}</b></div>` : "";
+  }).join("");
 }
 
 const stamp = () => `<div style="margin-top:4px;color:#666">시트 기준 ${esc(fetchedAt)} · ${places.length}곳</div>`;
