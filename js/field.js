@@ -164,7 +164,8 @@ const VIEW_KEY = "cet.mapView";
 const ETC_KEEP = ["P032", "P186", "P183", "P188", "P184", "P181",   // 옛 D2 마장로1길 상가 6곳
                   "P291", "P289", "P303", "P293"];                  // 옛 D5 동대문역 10번 출구 쪽 4곳
 const mapView = () => (Store.get(VIEW_KEY) === "v1" ? "v1" : "v2");
-const onMap = p => mapView() === "v1" || inZone(p) || ETC_KEEP.includes(p.place_id);
+// Bees 관리 업장은 구역 밖이어도 지도에 남긴다 (10월 24일)
+const onMap = p => mapView() === "v1" || inZone(p) || p.bees || ETC_KEEP.includes(p.place_id);
 
 function renderCounts() {
   const mine = state.places.filter(inZone);
@@ -179,9 +180,10 @@ function renderCounts() {
 }
 
 // Bees는 위 상태 숫자에도 함께 세고, 미조사와 관리와 재방문 수를 둘째 줄에 따로 보여준다
-// Bees도 구역에 든 곳만 센다. 재방문은 거의 비어 있어 제외로 바꿨다 (10월 18일)
+// 재방문은 거의 비어 있어 제외로 바꿨다 (10월 18일)
+// Bees 15곳은 구역 밖이어도 모두 센다 (10월 24일)
 function beesCount() {
-  const bees = state.places.filter(p => p.bees && inZone(p));
+  const bees = state.places.filter(p => p.bees);
   if (!bees.length) return "";
   const n = s => bees.filter(p => appStatus(p) === s).length;
   const chip = (s, color, label) => `<span class="cnt bees tap" data-list="${s}" data-bees="1"><i style="background:${color}"></i>${label} <b>${n(s)}</b></span>`;
@@ -427,7 +429,7 @@ function renderSheet(mode) {
     ${revisitLine}${manageLine}
     ${mode === "reason" ? reasonPicker() : mode === "complete" ? completePicker(isChecked(p["관리"])) : `
       <div class="st-btns">${STATUS_BUTTONS.map(s =>
-        `<button class="st ${s === current || (s === "완료" && current === "관리" && SHEET_TO_APP[p["진행상태"]] === "완료") ? "on" : ""}" data-st="${s}" style="--c:${STATUS_COLOR[s]}">${s}</button>`).join("")}</div>
+        `<button class="st ${s === current || (current === "관리" && s === SHEET_TO_APP[p["진행상태"]]) ? "on" : ""}" data-st="${s}" style="--c:${STATUS_COLOR[s]}">${s}</button>`).join("")}</div>
       <p class="muted small" id="saving">${state.pending[p.place_id] ? "저장 중" : ""}</p>`}
     ${p["지도링크"] ? `<a class="kakao" href="${esc(p["지도링크"])}" target="_blank" rel="noopener">카카오맵에서 열기</a>` : ""}`;
   $("sheet").hidden = false;
@@ -939,7 +941,10 @@ function focusPlace(placeId) {
 
 // 카운트를 누르면 그 index에 드는 업장만 목록으로 보여준다. 누르면 지도에서 그 업장으로 간다
 function openIndexList(key, beesOnly) {
-  const match = key === "기타" ? (p => !inZone(p)) : (p => inZone(p) && appStatus(p) === key);
+  // Bees 목록은 구역 밖까지 함께 보여준다 (10월 24일)
+  const match = key === "기타" ? (p => !inZone(p))
+    : beesOnly ? (p => appStatus(p) === key)
+    : (p => inZone(p) && appStatus(p) === key);
   const rows = state.places
     .filter(p => match(p) && (!beesOnly || p.bees))
     .map(p => ({ ...p, zone: zoneName(p) }))
