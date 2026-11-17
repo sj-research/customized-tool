@@ -18,6 +18,8 @@
  *   saveVisit      방문 저장. visits 1행, observations 여러 행, places 진행상태 갱신. { visit: {...} }
  *   mapData        현장 지도용 읽기. zones(TOBE가 있으면 TOBE만), places와 블로그 노출 목록. { }
  *   kpiMap         결과 정리 지도용 읽기. KPI 탭(값, 점수)과 "KPI 정리" 탭(place_id, 인터뷰)을 POC명으로 이어 좌표를 붙인다. { }
+ *   supportMap     외국인 지원 조사 화면용 읽기. 좌표가 있는 모든 업장, 조사 행(외국인지원 탭), 업태와 취급 브랜드, 구역. { }
+ *   saveSupport    외국인지원 탭에 조사 행을 쓴다(같은 place_id는 준 칸만 덮어씀). { items: [{ place_id, 칸이름: 값, ... }] }
  *   setStatus      places 진행상태 변경. { place_id, status, reason?, time?, manage? }. manage는 준 값만 바꾼다
  *   setManage      places 관리 체크를 목록대로 켠다. 목록에 없는 업장은 끈다. { items: [place_id, ...] }
  *   addPlace       places에 새 행. 임의 핀 { name, lat, lng }, 검색 결과 { name, lat, lng, kakao: { id, category, address, url } }, 비고 지정 note?
@@ -35,7 +37,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.25";
+const API_VERSION = "0.26";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전", "segmentation"];
@@ -91,6 +93,10 @@ function doPost(e) {
                        data: { zones: mapZones_(), places: readSheet_("places"), blogRank: blogRank_() } });
       case "kpiMap":
         return json_({ ok: true, version: API_VERSION, fetchedAt: formatDate_(new Date(), true), data: kpiMap_() });
+      case "supportMap":
+        return json_({ ok: true, version: API_VERSION, fetchedAt: formatDate_(new Date(), true), data: supportMap_() });
+      case "saveSupport":
+        return json_(withLock_(() => saveSupport_(req)));
       case "setStatus":
         return json_(withLock_(() => setStatus_(req)));
       case "setManage":
@@ -938,6 +944,171 @@ function kpiMap_() {
     });
   });
   return { zones: mapZones_(), flags: KPI_FLAGS, items: items, unmatched: unmatched };
+}
+
+/**
+ * 외국인 지원 조사 (11월 17일)
+ * 현장에서 매장마다 입력한 준비 정도와 니즈를 "외국인지원" 탭에 한 행씩 쌓는다. 한 매장 한 행이고 같은 place_id는 덮어쓴다
+ * 이 조사의 상태(미조사, 완료, 재방문, 제외)는 이 탭에만 둔다. places 진행상태는 건드리지 않는다
+ * (현장 지도와 결과 정리 지도의 숫자가 섞이지 않게)
+ */
+const SUPPORT_TAB = "외국인지원";
+const SUPPORT_HEADERS = ["place_id", "상호명", "구역", "층", "상태", "제외 구분", "제외 사유", "메모", "재방문 사유", "재방문 시각",
+  "L1 입간판", "L2 메뉴판", "L3 키오스크", "L4 안내물", "L5 온라인", "ASIS 단계", "TOBE 단계",
+  "적극성", "희망 지원", "가장 원하는 지원", "1순위 주류", "소주 비중", "NAB 수요", "경쟁 제로", "규칙 추천", "최종 추천", "추천 사유",
+  "시작 시각", "저장 시각"];
+const SUPPORT_STATUS = ["미조사", "완료", "재방문", "제외"];
+// 제외 사유 코드와 구분. 비대상은 모집단에서 빠지고 소극은 소극 구간으로 센다
+const SUPPORT_EXCLUDE = {
+  "폐업 또는 휴업": "비대상", "주류 미취급": "비대상", "업태 무관": "비대상", "중복 핀": "비대상",
+  "이미 담당자가 있음": "소극", "폐쇄적 또는 방어적": "소극", "업장이 너무 작음": "소극", "기타": "확인 필요",
+};
+const SUPPORT_LEVEL_COLS = ["L1 입간판", "L2 메뉴판", "L3 키오스크", "L4 안내물", "L5 온라인"];
+const SUPPORT_LEVEL_RE = /^(없음|(원래|설치|원래\+설치)(:(영|일|중|기타)(,(영|일|중|기타))*)?)$/;
+const SUPPORT_HELP = ["오프라인 메뉴판", "온라인 메뉴판", "키오스크 다국어화", "먹는 법 안내", "입간판 또는 외부 안내",
+  "포스터와 배너와 테이블텐트", "외국어 리뷰 유도", "응대용 번역 문구", "기타"];
+const SUPPORT_ENUM = {
+  "적극성": ["적극", "보통", "소극"],
+  "1순위 주류": ["맥주", "소주", "전통주", "위스키 또는 하이볼", "와인", "기타"],
+  "소주 비중": ["거의 없다", "절반 미만", "절반 이상", "대부분"],
+  "NAB 수요": ["자주", "가끔", "없음"],
+  "경쟁 제로": ["있음", "없음"],
+  "규칙 추천": ["한맥", "NAB", "후순위"],
+  "최종 추천": ["한맥", "NAB", "후순위"],
+  "가장 원하는 지원": SUPPORT_HELP,
+};
+const SUPPORT_FREE = ["층", "메모", "재방문 사유", "재방문 시각", "추천 사유", "시작 시각"];
+// 서버가 채우는 칸. 요청에 와도 무시한다
+const SUPPORT_SERVER = ["상호명", "구역", "제외 구분", "저장 시각"];
+const SEG_BRANDS = { "CASS": "카스", "한맥": "한맥", "테라": "테라", "켈리": "켈리", "클라우드": "클라우드", "필라이트": "필라이트", "레드락": "레드락" };
+
+/** 탭이 없으면 만들고, 열이 모자라면 끝에 붙인다 */
+function supportSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(SUPPORT_TAB);
+  if (!sheet) {
+    sheet = ss.insertSheet(SUPPORT_TAB);
+    if (sheet.getMaxColumns() < SUPPORT_HEADERS.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), SUPPORT_HEADERS.length - sheet.getMaxColumns());
+    sheet.getRange(1, 1, 1, SUPPORT_HEADERS.length).setValues([SUPPORT_HEADERS]).setFontWeight("bold");
+    sheet.setFrozenRows(1);
+    return sheet;
+  }
+  const have = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0].map(h => String(h).trim());
+  const missing = SUPPORT_HEADERS.filter(h => !have.includes(h));
+  if (missing.length) {
+    const start = have.filter(h => h).length + 1;
+    if (sheet.getMaxColumns() < start + missing.length - 1) sheet.insertColumnsAfter(sheet.getMaxColumns(), start + missing.length - 1 - sheet.getMaxColumns());
+    sheet.getRange(1, start, 1, missing.length).setValues([missing]).setFontWeight("bold");
+  }
+  return sheet;
+}
+
+/**
+ * 외국인 지원 조사 화면용 읽기. 좌표가 있는 모든 업장(회색으로 깔 곳), 조사 행, 업태와 취급 브랜드(미리 채울 값), 구역
+ */
+function supportMap_() {
+  const ss = SpreadsheetApp.getActive();
+  const text = v => (v === null || v === undefined ? "" : String(v).trim());
+  const places = readSheet_("places")
+    .filter(p => text(p["진행상태"]) !== "삭제" && p.lat !== null && p.lat !== "" && p.lng !== null && p.lng !== "")
+    .map(p => ({ id: text(p.place_id), name: text(p["상호명"]), zone: text(p.zone_id), lat: Number(p.lat), lng: Number(p.lng), addr: text(p["주소"]) }));
+  const rows = ss.getSheetByName(SUPPORT_TAB) ? readSheet_(SUPPORT_TAB) : [];
+  const seg = {};
+  if (ss.getSheetByName("segmentation")) {
+    readSheet_("segmentation").forEach(r => {
+      const id = text(r.place_id);
+      if (!id) return;
+      seg[id] = {
+        lv2: text(r["POCSegLevel2"]), lv3: text(r["POCSegLevel3"]),
+        brands: Object.keys(SEG_BRANDS).filter(k => text(r[k]).toUpperCase() === "Y").map(k => SEG_BRANDS[k]),
+        hanmac: text(r["한맥"]).toUpperCase() === "Y",
+        rivalZero: text(r["테라 제로"]).toUpperCase() === "Y" || text(r["하이트 제로"]).toUpperCase() === "Y",
+        draft: text(r["Draft 여부"]).toUpperCase() === "Y",
+      };
+    });
+  }
+  return { zones: mapZones_(), places: places, rows: rows, seg: seg };
+}
+
+/** 요청 한 건의 값을 검사해 칸 이름별 값으로 돌려준다 */
+function supportClean_(it) {
+  const out = {};
+  const text = v => (v === null || v === undefined ? "" : String(v).trim());
+  Object.keys(it).forEach(key => {
+    if (key === "place_id" || SUPPORT_SERVER.includes(key)) return;
+    if (!SUPPORT_HEADERS.includes(key)) throw new InputError("알 수 없는 칸입니다: " + key);
+    const v = text(it[key]);
+    if (v.length > 300) throw new InputError(key + " 값이 너무 깁니다");
+    if (key === "상태") {
+      if (v && !SUPPORT_STATUS.includes(v)) throw new InputError("상태가 올바르지 않습니다: " + v);
+    } else if (key === "제외 사유") {
+      if (v && !Object.prototype.hasOwnProperty.call(SUPPORT_EXCLUDE, v)) throw new InputError("제외 사유가 올바르지 않습니다: " + v);
+      out["제외 구분"] = v ? SUPPORT_EXCLUDE[v] : "";
+    } else if (SUPPORT_LEVEL_COLS.includes(key)) {
+      if (v && !SUPPORT_LEVEL_RE.test(v)) throw new InputError(key + " 값이 올바르지 않습니다: " + v);
+    } else if (key === "ASIS 단계" || key === "TOBE 단계") {
+      if (v && !/^L[0-5]$/.test(v)) throw new InputError(key + " 값이 올바르지 않습니다: " + v);
+    } else if (key === "희망 지원") {
+      v.split(",").map(s => s.trim()).filter(s => s).forEach(s => { if (!SUPPORT_HELP.includes(s)) throw new InputError("희망 지원 값이 올바르지 않습니다: " + s); });
+    } else if (SUPPORT_ENUM[key]) {
+      if (v && !SUPPORT_ENUM[key].includes(v)) throw new InputError(key + " 값이 올바르지 않습니다: " + v);
+    } else if (!SUPPORT_FREE.includes(key)) {
+      throw new InputError("쓸 수 없는 칸입니다: " + key);
+    }
+    out[key] = v;
+  });
+  if (out["상태"] === "제외") {
+    if (!out["제외 사유"]) throw new InputError("제외는 사유를 골라야 합니다");
+    if (out["제외 사유"] === "기타" && !out["메모"]) throw new InputError("제외 사유가 기타이면 메모를 적어야 합니다");
+  }
+  return out;
+}
+
+/**
+ * 외국인지원 탭에 행을 쓴다. 같은 place_id가 있으면 준 칸만 덮어쓰고, 없으면 새 행을 만든다. { items: [{ place_id, 칸이름: 값, ... }] }
+ * 상호명과 구역은 places에서 채우고 저장 시각은 서버가 적는다
+ */
+function saveSupport_(req) {
+  const items = Array.isArray(req.items) ? req.items : [];
+  if (!items.length || items.length > 200) throw new InputError("items는 1건 이상 200건 이하여야 합니다");
+  const places = {};
+  readSheet_("places").forEach(p => { places[String(p.place_id).trim()] = p; });
+  const cleaned = items.map(it => {
+    const id = String((it && it.place_id) || "").trim();
+    if (!places[id]) throw new InputError("place_id를 찾을 수 없습니다: " + id);
+    return { id: id, values: supportClean_(it) };
+  });
+
+  const sheet = supportSheet_();
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  const col = name => headers.indexOf(name);
+  const lastRow = Math.max(sheet.getLastRow(), 1);
+  const ids = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().map(r => String(r[0]).trim()) : [];
+  const now = formatDate_(new Date(), true);
+  const saved = [];
+  cleaned.forEach(c => {
+    let rowNo = ids.indexOf(c.id) >= 0 ? ids.indexOf(c.id) + 2 : 0;
+    let values;
+    if (rowNo) {
+      values = sheet.getRange(rowNo, 1, 1, headers.length).getValues()[0].map(v => (v === null || v === undefined ? "" : String(v)));
+    } else {
+      rowNo = ids.length + 2;
+      ids.push(c.id);
+      values = headers.map(() => "");
+      values[col("place_id")] = c.id;
+      values[col("상호명")] = String(places[c.id]["상호명"] || "");
+      values[col("구역")] = String(places[c.id].zone_id || "");
+      if (sheet.getMaxRows() < rowNo) sheet.insertRowsAfter(sheet.getMaxRows(), rowNo - sheet.getMaxRows());
+    }
+    Object.keys(c.values).forEach(h => { values[col(h)] = c.values[h]; });
+    values[col("저장 시각")] = now;
+    // 시각처럼 보이는 값이 바뀌지 않게 텍스트 서식으로 쓴다
+    sheet.getRange(rowNo, 1, 1, headers.length).setNumberFormat("@").setValues([values]);
+    const obj = {};
+    headers.forEach((h, i) => { if (h) obj[h] = values[i] === "" ? null : values[i]; });
+    saved.push(obj);
+  });
+  return { ok: true, saved: saved };
 }
 
 /**
