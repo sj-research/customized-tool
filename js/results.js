@@ -188,7 +188,7 @@ function drawMarks() {
 
 function renderSummary() {
   const st = zoneStats(undefined, true);
-  $("summary").innerHTML = `<span>KPI 도달 <b>${st.reached}</b>곳 / ${st.total}곳</span><span>KPI 합계 <b>${st.score}</b>점</span>`;
+  $("summary").innerHTML = `<span>KPI 도달 <b>${st.reached}</b>곳</span><span>KPI 합계 <b>${st.score}</b>점</span>`;
 }
 
 function renderLegend() {
@@ -235,7 +235,7 @@ function renderZoneBox() {
     <table class="zt" style="margin-top:10px"><thead><tr><th>구역</th><th class="num">도달 / POC</th><th class="num">KPI</th></tr></thead><tbody>${rows}</tbody></table>
     <h3>항목별 색</h3><div class="chips">${ITEMS.filter(it => !it.optional).map(it =>
       `<span class="chip" style="background:${it.color};color:${it.ink}">${esc(it.key)}</span>`).join("")}</div>
-    <div class="sub" style="margin-top:8px">마커는 사입 항목 수만큼 나뉘고 가운데 숫자가 KPI Score입니다. 회색 마커는 아직 사입 항목이 없는 POC입니다</div>`;
+    <div class="sub" style="margin-top:8px">마커는 사입 항목 수만큼 나뉘고 가운데 숫자가 KPI Score입니다</div>`;
   $("side").querySelectorAll("[data-zone]").forEach(r => r.onclick = () => selectZone(r.dataset.zone));
 }
 
@@ -334,7 +334,9 @@ async function load() {
   fetchedAt = body.fetchedAt || "";
   ZONES = (data.zones || []).filter(z => z.zone_id);
   zoneFeatures = parseFeatures(ZONES);
-  pocs = data.items || [];
+  // 사입 항목이 아직 하나도 없는 POC는 지도에 올리지 않는다 (11월 17일 성수진 지시: 육전제면소, 오모, 부오상회)
+  // 시트 KPI 탭에는 그대로 남아 있고, 항목이 하나라도 생기면 자동으로 올라온다
+  pocs = (data.items || []).filter(p => itemsOf(p).length);
   unmatched = data.unmatched || [];
   $("stamp").textContent = `시트 기준 ${fetchedAt} 총 ${pocs.length}곳`;
   if (unmatched.length) {
