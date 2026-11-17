@@ -1,0 +1,96 @@
+/* 결과 정리 지도. KPI 사입 항목을 구역 위에 한눈에 보여 준다 (11월 17일) */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; font-family: "Malgun Gothic", system-ui, sans-serif; font-size: 14px; color: #222; }
+#map { position: absolute; inset: 0; }
+
+/* 위쪽 두 줄. 막대 한 줄과 항목 범례 한 줄 */
+#top { position: absolute; top: 10px; left: 10px; right: 370px; z-index: 10; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+#top > * { pointer-events: auto; }
+.bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.title { padding: 7px 12px; border-radius: 8px; background: rgba(255,255,255,.95); box-shadow: 0 1px 4px rgba(0,0,0,.2); font-weight: 700; }
+#summary { display: flex; gap: 14px; padding: 7px 12px; border-radius: 8px; background: rgba(255,255,255,.95);
+  box-shadow: 0 1px 4px rgba(0,0,0,.2); font-size: 13px; flex-wrap: wrap; }
+#summary span { white-space: nowrap; }
+#summary b { font-size: 15px; }
+.views { display: flex; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.2); margin-left: auto; }
+.views button { padding: 7px 12px; border: 0; border-right: 1px solid #ddd; background: #fff; cursor: pointer; font: inherit; }
+.views button:last-child { border-right: 0; }
+#sideToggle { display: none; }
+
+/* 항목 범례. 누르면 그 항목이 든 POC만 남긴다 */
+#legend { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.lg { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 8px; border: 2px solid transparent; border-radius: 16px;
+  background: rgba(255,255,255,.96); box-shadow: 0 1px 4px rgba(0,0,0,.25); cursor: pointer; font: inherit; font-size: 12.5px; white-space: nowrap; }
+.lg i { width: 13px; height: 13px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.35); }
+.lg b { font-size: 13px; }
+.lg.on { border-color: #1f3a5f; background: #eef3fa; }
+.lg.empty { opacity: .55; }
+.lg.opt { background: #1f3a5f; color: #fff; border-color: #1f3a5f; }
+.lg.opt.off { background: rgba(255,255,255,.96); color: #444; border-color: transparent; }
+
+/* 마커. 항목 수만큼 나뉜 도넛이고 가운데 숫자가 KPI Score다 */
+.mk { width: 38px; height: 38px; cursor: pointer; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); transition: transform .12s; }
+.mk svg { display: block; width: 100%; height: 100%; }
+.mk.sel { transform: scale(1.3); filter: drop-shadow(0 0 0 #000) drop-shadow(0 2px 4px rgba(0,0,0,.6)); }
+.mk.dim { opacity: .28; }
+.mk.zero { opacity: .9; }
+
+.zlabel { padding: 3px 9px; border-radius: 12px; background: rgba(255,255,255,.94); border: 2px solid; text-align: center;
+  font-size: 12px; font-weight: 700; white-space: nowrap; line-height: 1.35; pointer-events: none; }
+.zlabel small { display: block; font-weight: 400; font-size: 11px; color: #444; }
+.station { padding: 2px 6px; background: #222; color: #fff; border-radius: 4px; font-size: 11px; white-space: nowrap; }
+
+/* 오른쪽 패널. 구역 요약과 POC 상세가 번갈아 들어간다 */
+#side { position: absolute; top: 10px; right: 10px; bottom: 10px; width: 350px; z-index: 12; overflow: auto;
+  background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.3); padding: 16px 16px 20px; line-height: 1.6; }
+#side.off { display: none; }
+#side h2 { margin: 0 0 2px; font-size: 18px; color: #1f3a5f; }
+#side h3 { margin: 16px 0 6px; font-size: 13px; color: #1f3a5f; }
+#side .sub { color: #667; font-size: 12.5px; }
+#side .back { border: 0; background: none; padding: 0 0 8px; color: #1864ab; cursor: pointer; font: inherit; font-size: 13px; }
+#side .score { margin: 10px 0 8px; font-size: 13px; color: #444; }
+#side .score b { font-size: 26px; color: #1f3a5f; margin-right: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { padding: 3px 9px; border-radius: 12px; font-size: 12px; font-weight: 700; border: 1px solid rgba(0,0,0,.25); }
+.tag { padding: 2px 9px; border-radius: 12px; font-size: 12px; background: #eef1f5; color: #34495e; }
+.txt { white-space: pre-wrap; word-break: keep-all; }
+.none { color: #99a; }
+.meta { display: grid; grid-template-columns: 54px 1fr; gap: 2px 8px; font-size: 12.5px; color: #445; }
+
+table.zt { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.zt th { text-align: left; font-weight: 700; color: #667; padding: 4px 4px; border-bottom: 2px solid #dde; white-space: nowrap; }
+.zt td { padding: 7px 4px; border-bottom: 1px solid #eef; vertical-align: top; }
+.zt tr.row { cursor: pointer; }
+.zt tr.row:hover td, .zt tr.row.sel td { background: #eef3fa; }
+.zt .num { text-align: right; white-space: nowrap; }
+.zt .zname { font-weight: 700; }
+.zt .zname small { display: block; font-weight: 400; color: #667; }
+.zdot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: baseline; }
+.mini { display: inline-flex; gap: 3px; flex-wrap: wrap; margin-top: 3px; }
+.mini span { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: #445; }
+.mini i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.3); }
+.bar2 { height: 5px; border-radius: 3px; background: #e6e9ef; margin-top: 4px; overflow: hidden; }
+.bar2 span { display: block; height: 100%; background: #1f3a5f; }
+
+#stamp { position: absolute; left: 10px; bottom: 10px; z-index: 9; padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,.85); font-size: 11px; color: #555; }
+#error { position: absolute; top: 100px; left: 10px; right: 370px; z-index: 11; padding: 10px 12px; border-radius: 8px;
+  background: #b3261e; color: #fff; display: none; line-height: 1.6; }
+#error.warn { background: #fff3cd; color: #5c4400; border: 1px solid #e6c200; }
+#error a { color: inherit; }
+
+/* 폰 화면. 패널은 아래에서 올라오는 시트가 된다 */
+@media (max-width: 720px) {
+  #top { right: 10px; }
+  #sideToggle { display: block; }
+  #side { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 48vh; border-radius: 14px 14px 0 0; }
+  #stamp { display: none; }
+  #error { right: 10px; top: 150px; }
+  .views { margin-left: 0; }
+  .title { padding: 6px 10px; }
+  #summary { gap: 10px; padding: 6px 10px; font-size: 12px; }
+  .views button { padding: 6px 10px; }
+  /* 범례는 한 줄로 두고 옆으로 민다. 네 줄로 쌓이면 지도를 가린다 */
+  #legend { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+  #legend::-webkit-scrollbar { display: none; }
+  .lg { flex: none; }
+}

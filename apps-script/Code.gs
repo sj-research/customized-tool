@@ -17,10 +17,12 @@
  *   structure      녹음 원문을 Claude로 구조화. 저장하지 않는다. { place_id, text }
  *   saveVisit      방문 저장. visits 1행, observations 여러 행, places 진행상태 갱신. { visit: {...} }
  *   mapData        현장 지도용 읽기. zones(TOBE가 있으면 TOBE만), places와 블로그 노출 목록. { }
+ *   kpiMap         결과 정리 지도용 읽기. KPI 탭(값, 점수)과 "KPI 정리" 탭(place_id, 인터뷰)을 POC명으로 이어 좌표를 붙인다. { }
  *   setStatus      places 진행상태 변경. { place_id, status, reason?, time?, manage? }. manage는 준 값만 바꾼다
  *   setManage      places 관리 체크를 목록대로 켠다. 목록에 없는 업장은 끈다. { items: [place_id, ...] }
  *   addPlace       places에 새 행. 임의 핀 { name, lat, lng }, 검색 결과 { name, lat, lng, kakao: { id, category, address, url } }, 비고 지정 note?
- *   saveSurvey     탭에 표를 쓴다. 기본 탭은 "전수 조사". 이미 내용이 있으면 overwrite: true일 때만 덮어쓴다. { headers[], rows[][], tab?, overwrite? }
+ *   saveSurvey     탭에 표를 쓴다. 기본 탭은 "전수 조사". 이미 내용이 있으면 overwrite: true일 때만 덮어쓴다. { headers[], rows[][], tab?, overwrite?, clearValidation? }
+ *                  clearValidation: true면 입력 규칙(드롭다운)도 지운다. 열 구성이 바뀌는 탭에만 쓴다
  *   addDictionary  사전 탭에 행 추가. 같은 인식결과가 있으면 건너뛴다. { items: [{ 구분, 용어 또는 인식결과, 의미 또는 교정, 상태, 비고 }] }
  *   setZonesTobe   zones 탭 1열 "구분"(ASIS, TOBE)을 만들고 TOBE 구역 행을 ASIS 행 아래에 새로 쓴다. { zones: [{ zone_id, 구역명, 경계, ... }] }
  *   setPlaceTags   places "TOBE 태그" 열을 목록대로 맞춘다. 목록에 없는 업장의 태그는 지운다. { items: [{ place_id, tag }] }
@@ -33,7 +35,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.22";
+const API_VERSION = "0.25";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전", "segmentation"];
@@ -87,6 +89,8 @@ function doPost(e) {
       case "mapData":
         return json_({ ok: true, version: API_VERSION, fetchedAt: formatDate_(new Date(), true),
                        data: { zones: mapZones_(), places: readSheet_("places"), blogRank: blogRank_() } });
+      case "kpiMap":
+        return json_({ ok: true, version: API_VERSION, fetchedAt: formatDate_(new Date(), true), data: kpiMap_() });
       case "setStatus":
         return json_(withLock_(() => setStatus_(req)));
       case "setManage":
@@ -886,6 +890,57 @@ function mapZones_() {
 }
 
 /**
+ * 결과 정리 지도용 읽기 (11월 17일)
+ * KPI 탭이 사입 값과 KPI Score(수식)를 들고 있고, "KPI 정리" 탭이 POC마다 place_id와 인터뷰 결과를 들고 있다.
+ * 두 탭을 POC명으로 잇고 places에서 좌표를 붙인다. 좌표를 못 붙인 POC는 unmatched로 따로 알려준다
+ * "KPI 정리" 탭이 없어도 동작한다 (그러면 place_id가 없어 모두 unmatched)
+ */
+const KPI_TAB = "KPI";
+const KPI_NOTES_TAB = "KPI 정리";
+const KPI_FLAGS = ["Bottle Hanmac", "Draft Hanmac", "Draft Stella", "Draft Bud", "NAB CASS 0.0", "NAB CASS LS 0.0", "NAB Combo", "BEES 10월", "BEES 11월"];
+
+function kpiMap_() {
+  const ss = SpreadsheetApp.getActive();
+  if (!ss.getSheetByName(KPI_TAB)) throw new InputError(`시트 탭을 찾을 수 없습니다: ${KPI_TAB}`);
+  const notes = {};
+  if (ss.getSheetByName(KPI_NOTES_TAB)) readSheet_(KPI_NOTES_TAB).forEach(r => { notes[String(r["POC명"]).trim()] = r; });
+  const places = {};
+  readSheet_("places").forEach(p => { places[String(p.place_id)] = p; });
+  const yes = v => v === true || String(v).toUpperCase() === "TRUE";
+  const text = v => (v === null || v === undefined ? "" : String(v).trim());
+
+  const items = [], unmatched = [];
+  readSheet_(KPI_TAB).forEach(r => {
+    const poc = text(r["POC명"]);
+    const note = notes[poc] || {};
+    const p = places[text(note.place_id)];
+    if (!p || p.lat === null || p.lat === "" || p.lng === null || p.lng === "") { unmatched.push(poc); return; }
+    const flags = {};
+    KPI_FLAGS.forEach(f => { flags[f] = yes(r[f]); });
+    const zone = text(r.zone_id) || text(p.zone_id);
+    items.push({
+      poc: poc,
+      place_id: text(p.place_id),
+      name: text(p["상호명"]),
+      address: text(p["주소"]),
+      lat: Number(p.lat),
+      lng: Number(p.lng),
+      zone_id: zone === "기타" ? "" : zone,
+      score: Number(r["KPI Score"]) || 0,
+      summary: text(r["사입 요약"]),
+      proof: yes(r["증빙"]),
+      date: text(r["일자"]),
+      flags: flags,
+      needs: text(note["Needs"]),
+      solution: text(note["Solution"]),
+      customers: text(note["외국인/단골 고객 언급(인터뷰 결과)"]),
+      method: text(note["사입 방법"]),
+    });
+  });
+  return { zones: mapZones_(), flags: KPI_FLAGS, items: items, unmatched: unmatched };
+}
+
+/**
  * zones 탭에 TOBE 구역을 쓴다. 여러 번 실행해도 결과가 같다
  * 1. 1열이 "구분"이 아니면 맨 앞에 열을 끼우고 기존 행을 ASIS로 채운다 (기존 수식 참조는 시트가 함께 옮긴다)
  * 2. 기존 TOBE 행을 지우고 ASIS 행 아래에 새로 쓴다
@@ -1027,6 +1082,12 @@ function saveSurvey_(req) {
   sheet.clearContents();
   if (sheet.getMaxColumns() < headers.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), headers.length - sheet.getMaxColumns());
   if (sheet.getMaxRows() < rows.length + 1) sheet.insertRowsAfter(sheet.getMaxRows(), rows.length + 1 - sheet.getMaxRows());
+  // clearContents는 입력 규칙(드롭다운)을 지우지 않는다.
+  // 열 구성이 바뀌는 탭은 예전 규칙이 새 값을 막으므로 요청할 때만 규칙도 지운다 (10월 30일 성수진 지시)
+  // clearDataValidations는 Sheet가 아니라 Range의 메서드라 시트 전체 범위를 잡아서 부른다
+  if (req.clearValidation === true) {
+    sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+  }
   const values = [headers, ...rows.map(r => r.map(v => (v === null || v === undefined ? "" : String(v))))];
   // 날짜처럼 보이는 값이 바뀌지 않게 텍스트 서식으로 쓴다
   sheet.getRange(1, 1, values.length, headers.length).setNumberFormat("@").setValues(values);
