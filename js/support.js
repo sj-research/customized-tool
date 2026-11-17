@@ -159,18 +159,37 @@ function search() {
 
 function origin() { return me || (map ? { lat: map.getCenter().getLat(), lng: map.getCenter().getLng() } : { lat: 37.5712, lng: 127.0125 }); }
 
-function openList(status) {
-  const o = origin();
-  const list = Object.keys(rows).filter(id => byId[id] && counted(id) && statusOf(id) === status)
-    .map(id => ({ p: byId[id], d: distanceM(o.lat, o.lng, byId[id].lat, byId[id].lng) })).sort((a, b) => a.d - b.d);
-  const from = me ? "내 위치" : "지도 가운데";
-  $("listPanel").innerHTML = `<div class="s-head"><div><h3>${esc(status)} ${list.length}곳</h3><p class="muted">${from}에서 가까운 순</p></div><button class="x" data-a="closeList">✕</button></div>`
-    + (list.length ? list.map(({ p, d }) => `<button class="li" data-id="${esc(p.id)}"><i style="background:${STATUS_COLOR[status]}"></i>
-        <span class="nm">${esc(p.name)}<small>${esc(p.zone || "구역 밖")} ${esc(seg[p.id] ? seg[p.id].lv3 : "")}</small></span><span class="ds">${d < 1000 ? Math.round(d) + "m" : (d / 1000).toFixed(1) + "km"}</span></button>`).join("")
-      : `<p class="muted">해당하는 곳이 없습니다</p>`);
+let listFilter = "전체", listSort = "거리";
+function openList(filter) {
+  if (filter) listFilter = filter;
+  renderList();
   $("listPanel").hidden = false;
-  $("listPanel").querySelector("[data-a=closeList]").onclick = () => { $("listPanel").hidden = true; };
-  $("listPanel").querySelectorAll("[data-id]").forEach(b => b.onclick = () => { $("listPanel").hidden = true; goTo(b.dataset.id); });
+  closeSheet();
+}
+
+// 조사 대상 전체를 한눈에 본다. 상태별로 걸러 보고 가까운 순이나 구역별로 정렬한다
+function renderList() {
+  const o = origin();
+  const all = Object.keys(rows).filter(id => byId[id] && counted(id)).map(id => ({ p: byId[id], st: statusOf(id), d: distanceM(o.lat, o.lng, byId[id].lat, byId[id].lng) }));
+  const n = { "전체": all.length };
+  Object.keys(STATUS_COLOR).forEach(s => { n[s] = all.filter(x => x.st === s).length; });
+  const list = all.filter(x => listFilter === "전체" || x.st === listFilter);
+  list.sort(listSort === "구역"
+    ? (a, b) => (a.p.zone || "ZZ").localeCompare(b.p.zone || "ZZ") || a.p.name.localeCompare(b.p.name)
+    : (a, b) => a.d - b.d);
+  const from = me ? "내 위치" : "지도 가운데";
+  const fbtn = ["전체", ...Object.keys(STATUS_COLOR)].map(f => `<button class="b sm${listFilter === f ? " on" : ""}" data-f="${f}">${f} ${n[f]}</button>`).join("");
+  const sbtn = ["거리", "구역"].map(s => `<button class="b sm${listSort === s ? " on" : ""}" data-s="${s}">${s === "거리" ? "가까운 순" : "구역별"}</button>`).join("");
+  $("listPanel").innerHTML = `<div class="stick"><div class="s-head"><div><h3>${listFilter === "전체" ? "조사 대상" : esc(listFilter)} ${list.length}곳</h3><p class="muted">${listSort === "거리" ? from + "에서 가까운 순" : "구역별"}</p></div><button class="x" data-a="closeList">✕</button></div>
+      <div class="chips">${fbtn}</div><div class="chips" style="margin-top:6px">${sbtn}</div></div>`
+    + (list.length ? list.map(({ p, st, d }) => `<button class="li" data-id="${esc(p.id)}"><i style="background:${STATUS_COLOR[st]}"></i>
+        <span class="nm">${esc(p.name)}<small>${esc(p.zone || "구역 밖")} ${esc(seg[p.id] ? seg[p.id].lv3 : "")}${listFilter === "전체" ? " / " + st : ""}</small></span><span class="ds">${d < 1000 ? Math.round(d) + "m" : (d / 1000).toFixed(1) + "km"}</span></button>`).join("")
+      : `<p class="muted" style="margin-top:14px">해당하는 곳이 없습니다</p>`);
+  const panel = $("listPanel");
+  panel.querySelector("[data-a=closeList]").onclick = () => { panel.hidden = true; };
+  panel.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { listFilter = b.dataset.f; renderList(); panel.scrollTop = 0; });
+  panel.querySelectorAll("[data-s]").forEach(b => b.onclick = () => { listSort = b.dataset.s; renderList(); panel.scrollTop = 0; });
+  panel.querySelectorAll("[data-id]").forEach(b => b.onclick = () => { panel.hidden = true; goTo(b.dataset.id); });
 }
 
 function locate() {
@@ -533,6 +552,7 @@ async function start() {
   $("q").addEventListener("input", search);
   $("fit").onclick = () => { closeSheet(); fitTargets(); };
   $("locate").onclick = locate;
+  $("listBtn").onclick = () => openList("전체");
   $("queue").onclick = flush;
   window.addEventListener("online", flush);
   try { await load(); renderQueue(); flush(); } catch (err) { fail(esc(err.message)); }

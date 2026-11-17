@@ -22,14 +22,14 @@ button { font: inherit; color: inherit; }
 /* 마커. 회색은 명단 밖 업장이고 색이 있는 것이 조사 대상이다. 눌리는 면은 크게, 보이는 점은 작게 */
 .mk { position: relative; width: 30px; height: 30px; cursor: pointer; }
 .mk::before { content: ""; position: absolute; left: 50%; top: 50%; border-radius: 50%; transform: translate(-50%, -50%); transition: transform .12s; }
-.mk.g::before { width: 9px; height: 9px; background: #aeb4bb; border: 1px solid #fff; }
-.mk.t::before { width: 20px; height: 20px; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.mk.g::before { width: 11px; height: 11px; background: #aeb4bb; border: 1.5px solid #fff; box-shadow: 0 0 2px rgba(0,0,0,.35); }
+.mk.t::before { width: 12px; height: 12px; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.5); }
 .mk.todo::before { background: #e8590c; }
 .mk.done::before { background: #2b8a3e; }
 .mk.again::before { background: #c2255c; }
-.mk.out::before { background: #fff; border: 3px solid #868e96; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
-.mk.out::after { content: "✕"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -52%); font-size: 11px; font-weight: 700; color: #868e96; }
-.mk.sel::before { transform: translate(-50%, -50%) scale(1.45); }
+.mk.out::before { background: #fff; border: 2px solid #868e96; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.mk.out::after { content: "✕"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -52%); font-size: 9px; font-weight: 700; color: #868e96; }
+.mk.sel::before { transform: translate(-50%, -50%) scale(1.6); }
 .zlabel { padding: 1px 6px; border-radius: 8px; background: rgba(255,255,255,.8); color: #666; font-size: 11px; font-weight: 700; pointer-events: none; }
 .me { width: 16px; height: 16px; border-radius: 50%; background: #1c7ed6; border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(28,126,214,.25); }
 
@@ -103,3 +103,8 @@ label.in textarea { min-height: 64px; resize: vertical; }
 @media (min-width: 760px) {
   #sheet, #listPanel, #pinSheet { left: 12px; right: auto; width: 430px; bottom: 12px; max-height: calc(100vh - 150px); border-radius: 16px; }
 }
+
+/* 목록 위쪽(제목과 필터)은 스크롤해도 남긴다 */
+.stick { position: sticky; top: -14px; z-index: 2; margin: -14px -14px 4px; padding: 14px 14px 10px; background: #fff; border-bottom: 1px solid #eef; }
+.b.sm { min-height: 34px; padding: 0 11px; font-size: 13.5px; }
+#listPanel { max-height: 86vh; }
