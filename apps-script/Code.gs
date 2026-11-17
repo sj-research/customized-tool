@@ -18,7 +18,7 @@
  *   saveVisit      방문 저장. visits 1행, observations 여러 행, places 진행상태 갱신. { visit: {...} }
  *   mapData        현장 지도용 읽기. zones(TOBE가 있으면 TOBE만), places와 블로그 노출 목록. { }
  *   kpiMap         결과 정리 지도용 읽기. KPI 탭(값, 점수)과 "KPI 정리" 탭(place_id, 인터뷰)을 POC명으로 이어 좌표를 붙인다. { }
- *   supportMap     외국인 지원 조사 화면용 읽기. 좌표가 있는 모든 업장, 조사 행(외국인지원 탭), 업태와 취급 브랜드, 구역. { }
+ *   supportMap     외국인 지원 조사 화면용 읽기. 좌표가 있는 모든 업장, 조사 행(외국인지원 탭), 업태와 취급 브랜드, 사진 코딩(사진코딩 탭), 구역. { }
  *   saveSupport    외국인지원 탭에 조사 행을 쓴다(같은 place_id는 준 칸만 덮어씀). { items: [{ place_id, 칸이름: 값, ... }] }
  *   setStatus      places 진행상태 변경. { place_id, status, reason?, time?, manage? }. manage는 준 값만 바꾼다
  *   setManage      places 관리 체크를 목록대로 켠다. 목록에 없는 업장은 끈다. { items: [place_id, ...] }
@@ -37,7 +37,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.26";
+const API_VERSION = "0.27";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전", "segmentation"];
@@ -980,6 +980,8 @@ const SUPPORT_ENUM = {
 const SUPPORT_FREE = ["층", "메모", "재방문 사유", "재방문 시각", "추천 사유", "시작 시각"];
 // 서버가 채우는 칸. 요청에 와도 무시한다
 const SUPPORT_SERVER = ["상호명", "구역", "제외 구분", "저장 시각"];
+const CODING_TAB = "사진코딩";
+const CODING_LEVELS = ["L1 입간판", "L2 메뉴판", "L3 키오스크", "L4 안내물", "L5 온라인"];
 const SEG_BRANDS = { "CASS": "카스", "한맥": "한맥", "테라": "테라", "켈리": "켈리", "클라우드": "클라우드", "필라이트": "필라이트", "레드락": "레드락" };
 
 /** 탭이 없으면 만들고, 열이 모자라면 끝에 붙인다 */
@@ -1027,7 +1029,23 @@ function supportMap_() {
       };
     });
   }
-  return { zones: mapZones_(), places: places, rows: rows, seg: seg };
+  // 사진을 보고 미리 코딩해 둔 준비 정도. 칸 형식은 "값:언어:사진번호"이고 값 Y는 분명히 보이는 것, ?는 후보다
+  const coding = {};
+  if (ss.getSheetByName(CODING_TAB)) {
+    readSheet_(CODING_TAB).forEach(r => {
+      const id = text(r.place_id);
+      if (!id) return;
+      const levels = {};
+      CODING_LEVELS.forEach((name, i) => {
+        const v = text(r[name + " 코딩"]);
+        if (!v) return;
+        const parts = v.split(":");
+        levels["L" + (i + 1)] = { v: parts[0], lang: parts[1] || "", photos: parts[2] || "", note: text(r[name + " 근거"]) };
+      });
+      coding[id] = { levels: levels, memo: text(r["메모"]), n: Number(r["사진수"]) || 0 };
+    });
+  }
+  return { zones: mapZones_(), places: places, rows: rows, seg: seg, coding: coding };
 }
 
 /** 요청 한 건의 값을 검사해 칸 이름별 값으로 돌려준다 */

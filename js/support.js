@@ -41,7 +41,7 @@ const $ = id => document.getElementById(id);
 const fixturePath = () => new URLSearchParams(location.search).get("fixture");
 
 let map = null, homed = false, me = null, meOverlay = null;
-let ZONES = [], features = [], places = [], byId = {}, rows = {}, seg = {}, fetchedAt = "";
+let ZONES = [], features = [], places = [], byId = {}, rows = {}, seg = {}, coding = {}, fetchedAt = "";
 const marks = {};
 let selId = null, draft = null, queue = [], flushing = false;
 const layers = { zones: [], labels: [] };
@@ -183,7 +183,7 @@ function renderList() {
   $("listPanel").innerHTML = `<div class="stick"><div class="s-head"><div><h3>${listFilter === "전체" ? "조사 대상" : esc(listFilter)} ${list.length}곳</h3><p class="muted">${listSort === "거리" ? from + "에서 가까운 순" : "구역별"}</p></div><button class="x" data-a="closeList">✕</button></div>
       <div class="chips">${fbtn}</div><div class="chips" style="margin-top:6px">${sbtn}</div></div>`
     + (list.length ? list.map(({ p, st, d }) => `<button class="li" data-id="${esc(p.id)}"><i style="background:${STATUS_COLOR[st]}"></i>
-        <span class="nm">${esc(p.name)}<small>${esc(p.zone || "구역 밖")} ${esc(seg[p.id] ? seg[p.id].lv3 : "")}${listFilter === "전체" ? " / " + st : ""}</small></span><span class="ds">${d < 1000 ? Math.round(d) + "m" : (d / 1000).toFixed(1) + "km"}</span></button>`).join("")
+        <span class="nm">${esc(p.name)}<small>${esc(p.zone || "구역 밖")} ${esc(seg[p.id] ? seg[p.id].lv3 : "")}${listFilter === "전체" ? " / " + st : ""}${coding[p.id] ? " / 코딩" : ""}</small></span><span class="ds">${d < 1000 ? Math.round(d) + "m" : (d / 1000).toFixed(1) + "km"}</span></button>`).join("")
       : `<p class="muted" style="margin-top:14px">해당하는 곳이 없습니다</p>`);
   const panel = $("listPanel");
   panel.querySelector("[data-a=closeList]").onclick = () => { panel.hidden = true; };
@@ -273,13 +273,27 @@ function levelValue(l) {
   return kind + (l.langs.length ? ":" + l.langs.join(",") : "");
 }
 
+// 사진 코딩에서 다국어가 분명히 확인된 것(Y이고 언어가 영, 일, 중, 기타, 다국어)만 미리 채운다. 국문뿐이거나 후보, 언어 확인필요는 힌트만 보여 준다
+// 온라인 연계(L5)는 언어가 의미 없어 Y이면 된다. 나머지는 외국어나 다국어가 확인되어야 한다
+const isMulti = (c, level) => c && c.v === "Y" && (level === 5 || /영|일|중|기타|다국어/.test(c.lang || ""));
+const codingOf = id => (coding[id] && coding[id].levels) || {};
+
 function makeDraft(id) {
   const r = rows[id] || {}, g = seg[id] || {};
   const st = text(r["상태"]);
+  const cd = codingOf(id), coded = [];
+  // 이미 저장한 값이 있으면 그것이 우선이다. 비어 있을 때만 코딩으로 채운다
+  const L = LEVELS.map((lv, i) => {
+    if (text(r[lv.col])) return parseLevel(r[lv.col]);
+    const c = cd["L" + (i + 1)];
+    if (isMulti(c, i + 1)) { coded[i] = true; return { orig: true, ours: false, langs: c.lang.split(",").map(x => x.trim()).filter(x => LANGS.includes(x)) }; }
+    return parseLevel("");
+  });
   return {
+    coded,
     status: st && st !== "미조사" ? st : "",
     excl: text(r["제외 사유"]), memo: text(r["메모"]), rvReason: text(r["재방문 사유"]), rvTime: text(r["재방문 시각"]),
-    L: LEVELS.map(lv => parseLevel(r[lv.col])),
+    L,
     act: text(r["적극성"]), help: splitList(r["희망 지원"]), helpTop: text(r["가장 원하는 지원"]),
     drink: text(r["1순위 주류"]), soju: text(r["소주 비중"]), nab: text(r["NAB 수요"]),
     rival: text(r["경쟁 제로"]) || (g.rivalZero ? "있음" : ""),
@@ -296,7 +310,7 @@ const actOf = d => derivedAct(d) || d.act;
 
 function recommend(d) {
   const nab = d.nab === "자주" || d.nab === "가끔", sojuHeavy = d.soju === "절반 이상" || d.soju === "대부분";
-  if (!d.nab || !d.soju) return null;
+  if (!d.nab) return null;
   if (nab) return { rec: "NAB", note: d.rival === "있음" ? "NAB 수요가 있고 경쟁 제로가 있어 LS 0.0(레몬)부터" : d.rival === "없음" ? "NAB 수요가 있고 경쟁 제로가 없어 CASS 0.0부터" : "NAB 수요가 있습니다. 경쟁 제로 여부를 확인하세요" };
   if (sojuHeavy) return { rec: "후순위", note: "소주 비중이 절반 이상이라 한맥 제안의 우선순위를 낮춥니다" };
   return { rec: "한맥", note: "기본 추천(Korean Lager)" };
@@ -324,7 +338,7 @@ function renderSheet() {
   const p = byId[selId], g = seg[selId] || {}, d = draft;
   const keep = $("sheet").scrollTop;
   const info = [p.zone || "구역 밖", g.lv3, g.brands && g.brands.length ? "취급 " + g.brands.join(", ") : ""].filter(Boolean).join("  /  ");
-  let html = `<div class="s-head"><div><h3>${esc(p.name)}${rows[selId] ? "" : `<span class="tag">명단 밖</span>`}</h3><p class="muted">${esc(info)}</p></div><button class="x" data-a="close">✕</button></div>
+  let html = `<div class="s-head"><div><h3>${esc(p.name)}${rows[selId] ? "" : `<span class="tag">명단 밖</span>`}${coding[selId] ? `<span class="tag cd">사진 코딩</span>` : ""}</h3><p class="muted">${esc(info)}</p></div><button class="x" data-a="close">✕</button></div>
     <div class="st-row">${["완료", "재방문", "제외"].map(s => `<button class="st${d.status === s ? " on" : ""}" data-a="status" data-v="${s}" style="--c:${STATUS_COLOR[s]}">${s === "완료" ? "조사 완료" : s}</button>`).join("")}</div>`;
   if (d.status === "제외") html += excludePanel(d);
   else if (d.status === "재방문") html += revisitPanel(d);
@@ -349,9 +363,16 @@ function revisitPanel(d) {
     <button class="save again" data-a="save">재방문으로 저장</button>`;
 }
 
+function codingHint(id, i) {
+  const c = codingOf(id)["L" + (i + 1)];
+  if (!c) return "";
+  const lang = c.lang ? ` (${c.lang})` : "";
+  return `사진 코딩: ${c.v === "Y" ? "있음" : "후보"}${lang}${c.photos ? ", 사진 " + c.photos + "번" : ""}. ${c.note || ""}`;
+}
+
 function levelRow(d, i) {
-  const lv = LEVELS[i], l = d.L[i], on = l.orig || l.ours;
-  return `<div class="lv"><div class="nm">${esc(lv.name)}${lv.hint ? `<small>${esc(lv.hint)}</small>` : ""}</div>
+  const lv = LEVELS[i], l = d.L[i], on = l.orig || l.ours, hint = codingHint(selId, i);
+  return `<div class="lv"><div class="nm">${esc(lv.name)}${d.coded[i] ? `<span class="tag cd">코딩</span>` : ""}${lv.hint ? `<small>${esc(lv.hint)}</small>` : ""}${hint ? `<small class="ch">${esc(hint)}</small>` : ""}</div>
     <div class="tg"><button class="b${l.orig ? " on" : ""}" data-a="lvo" data-i="${i}">원래 있음</button><button class="b${l.ours ? " on" : ""}" data-a="lvs" data-i="${i}">우리 설치</button></div>
     ${on ? `<div class="lg"><span>언어</span>${LANGS.map(x => `<button class="b${l.langs.includes(x) ? " on" : ""}" data-a="lang" data-i="${i}" data-v="${x}">${x}</button>`).join("")}</div>` : ""}</div>`;
 }
@@ -359,14 +380,20 @@ function levelRow(d, i) {
 function donePanel(d, g) {
   const asis = stageOf(d, "orig"), tobe = stageOf(d, "all"), auto = derivedAct(d), act = actOf(d);
   let html = `<h4>1 준비 정도 <small>켠 것만 있음으로 기록됩니다. 아무것도 없으면 그대로 두세요</small></h4>`;
+  const cdm = coding[selId];
+  if (cdm) {
+    const any = Object.keys(cdm.levels || {}).length;
+    html += `<div class="cdnote">사진 ${cdm.n}장을 보고 미리 코딩했습니다. ${any ? "다국어가 확인된 것은 미리 켜 두었고 현장에서 맞는지 확인해 주세요." : "준비 정도를 알 수 있는 사진은 없었습니다(없음으로 단정하지 않습니다)."}${cdm.memo ? "<br>" + esc(cdm.memo) : ""}</div>`;
+  }
   html += LEVELS.map((_, i) => levelRow(d, i)).join("");
   html += `<div class="badge">개입 전 L${asis}${tobe !== asis ? `, 설치 후 L${tobe}` : ""}</div>`;
 
   html += `<h4>2 업주 니즈</h4>`;
   if (auto) html += `<div class="badge">적극성 ${auto} (준비 정도로 자동 판정)</div>`;
   else html += `<div class="grp"><b>외국인 준비에 대한 적극성</b>${chips("act", ACT, v => d.act === v)}</div>`;
-  html += `<div class="grp"><b>가장 많이 나가는 주류</b>${chips("drink", DRINK, v => d.drink === v)}</div>
-    <div class="grp"><b>소주 비중</b><div class="seg">${SOJU.map(v => bt("soju", v, d.soju === v)).join("")}</div></div>`;
+  const sojuHint = g.lv3 === "EASY MEAL" ? `<div class="muted" style="margin:0 0 6px">국밥류(EASY MEAL)는 소주 비중이 클 가능성이 있습니다(추정). 확인되면 눌러 주세요</div>` : "";
+  html += `<div class="grp"><b>가장 많이 나가는 주류 <small>선택</small></b>${chips("drink", DRINK, v => d.drink === v)}</div>
+    <div class="grp"><b>소주 비중 <small>선택, 가볍게</small></b>${sojuHint}<div class="seg">${SOJU.map(v => bt("soju", v, d.soju === v)).join("")}</div></div>`;
   if (act === "소극") {
     html += `<div class="rec none">소극으로 기록합니다. 희망 지원과 제품 추천은 묻지 않습니다</div>`;
   } else {
@@ -380,7 +407,7 @@ function donePanel(d, g) {
     html += r ? `<div class="rec">규칙 추천 <b>${r.rec}</b><br>${esc(r.note)}</div>
       <div class="grp"><b>최종 추천</b><div class="seg">${FINAL.map(v => bt("final", v, (d.final || r.rec) === v)).join("")}</div></div>
       ${(d.final && d.final !== r.rec) ? `<label class="in">추천을 바꾼 사유<input id="why" type="text" value="${esc(d.why)}" placeholder="한 줄" autocomplete="off"></label>` : ""}`
-      : `<div class="rec none">소주 비중과 NAB 수요를 고르면 추천이 자동으로 나옵니다</div>`;
+      : `<div class="rec none">NAB 수요를 고르면 추천이 자동으로 나옵니다(소주 비중을 고르면 함께 반영됩니다)</div>`;
   }
   html += `<label class="in">메모<textarea id="memo" placeholder="선택">${esc(d.memo)}</textarea></label>
     <button class="save" data-a="save">완료로 저장</button>`;
@@ -400,9 +427,9 @@ function onSheetClick(e) {
     case "status": draft.status = v; break;
     case "excl": draft.excl = v; break;
     case "rvr": draft.rvReason = v; break;
-    case "lvo": draft.L[i].orig = !draft.L[i].orig; break;
-    case "lvs": draft.L[i].ours = !draft.L[i].ours; break;
-    case "lang": toggle(draft.L[i].langs, v); break;
+    case "lvo": draft.L[i].orig = !draft.L[i].orig; draft.coded[i] = false; break;
+    case "lvs": draft.L[i].ours = !draft.L[i].ours; draft.coded[i] = false; break;
+    case "lang": toggle(draft.L[i].langs, v); draft.coded[i] = false; break;
     case "act": draft.act = v; break;
     case "drink": draft.drink = v; break;
     case "soju": draft.soju = v; break;
@@ -433,8 +460,6 @@ function buildItem() {
   if (d.status !== "완료") return { error: "상태를 고르세요" };
   const act = actOf(d), miss = [];
   if (!act) miss.push("적극성");
-  if (!d.drink) miss.push("가장 많이 나가는 주류");
-  if (!d.soju) miss.push("소주 비중");
   const rec = recommend(d);
   if (act && act !== "소극") { if (!d.nab) miss.push("NAB 수요"); if (!d.rival) miss.push("경쟁 제로"); }
   if (miss.length) return { error: miss.join(", ") + "을(를) 골라 주세요" };
@@ -527,6 +552,7 @@ async function load() {
   places = data.places || [];
   byId = Object.fromEntries(places.map(p => [p.id, p]));
   seg = data.seg || {};
+  coding = data.coding || {};
   rows = {};
   (data.rows || []).forEach(r => { if (text(r.place_id)) rows[text(r.place_id)] = r; });
   // 아직 서버에 못 보낸 입력은 화면에 다시 얹는다
