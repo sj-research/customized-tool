@@ -13,6 +13,7 @@ const STATIONS = [
 const STATUS_CLASS = { "미조사": "todo", "완료": "done", "재방문": "again", "제외": "out" };
 const STATUS_COLOR = { "미조사": "#e8590c", "완료": "#2b8a3e", "재방문": "#c2255c", "제외": "#868e96" };
 const QUEUE_KEY = "cet.support.queue";
+const GOAL = 105; // 현장에서 넣고 빼서 맞출 최종 조사 대상 수
 
 // 준비 정도 단계. 키는 시트 칸 이름과 같다
 const LEVELS = [
@@ -33,7 +34,7 @@ const HELP = ["오프라인 메뉴판", "온라인 메뉴판", "키오스크 다
 const DRINK = ["맥주", "소주", "전통주", "위스키 또는 하이볼", "와인", "기타"];
 const SOJU = ["거의 없다", "절반 미만", "절반 이상", "대부분"];
 const NAB = ["자주", "가끔", "없음"];
-const RIVAL = ["있음", "없음"];
+const NABHAVE = ["카스 0.0", "카스 레몬 0.0", "테라 제로", "하이트 제로", "기타", "없음"];
 const ACT = ["적극", "보통", "소극"];
 const FINAL = ["한맥", "NAB", "후순위"];
 
@@ -41,7 +42,7 @@ const $ = id => document.getElementById(id);
 const fixturePath = () => new URLSearchParams(location.search).get("fixture");
 
 let map = null, homed = false, me = null, meOverlay = null;
-let ZONES = [], features = [], places = [], byId = {}, rows = {}, seg = {}, coding = {}, fetchedAt = "";
+let ZONES = [], features = [], places = [], byId = {}, rows = {}, seg = {}, coding = {}, nabSeen = {}, cands = {}, fetchedAt = "";
 const marks = {};
 let selId = null, draft = null, queue = [], flushing = false;
 const layers = { zones: [], labels: [] };
@@ -138,7 +139,9 @@ function paintMark(id) {
 function renderCounts() {
   const c = { "미조사": 0, "완료": 0, "재방문": 0, "제외": 0 };
   Object.keys(rows).filter(counted).forEach(id => { c[statusOf(id)] = (c[statusOf(id)] || 0) + 1; });
-  $("counts").innerHTML = Object.keys(c).map(s => `<button class="cnt" data-list="${s}"><i style="background:${STATUS_COLOR[s]}"></i>${s} <b>${c[s]}</b></button>`).join("");
+  const n = Object.keys(rows).filter(counted).length;
+  $("counts").innerHTML = `<button class="cnt goal${n === GOAL ? " ok" : ""}" data-list="전체">대상 <b>${n}</b> / ${GOAL}</button>`
+    + Object.keys(c).map(s => `<button class="cnt" data-list="${s}"><i style="background:${STATUS_COLOR[s]}"></i>${s} <b>${c[s]}</b></button>`).join("");
   $("counts").querySelectorAll("[data-list]").forEach(b => b.onclick = () => openList(b.dataset.list));
 }
 
@@ -151,7 +154,7 @@ function search() {
   if (!q) return closeHits();
   const hit = places.filter(p => norm(p.name).includes(q)).slice(0, 8);
   $("hits").innerHTML = hit.length
-    ? hit.map(p => `<button data-id="${esc(p.id)}">${esc(p.name)}<small>${esc(p.zone || "구역 밖")} ${esc(statusOf(p.id) || "")}</small></button>`).join("")
+    ? hit.map(p => `<button data-id="${esc(p.id)}">${esc(p.name)}<small>${esc(p.zone || "구역 밖")} ${esc(statusOf(p.id) || (cands[p.id] !== undefined ? "후보" : ""))}</small></button>`).join("")
     : `<button disabled>일치하는 업장이 없습니다</button>`;
   $("hits").hidden = false;
   $("hits").querySelectorAll("[data-id]").forEach(b => b.onclick = () => { closeHits(); $("q").value = ""; goTo(b.dataset.id); });
@@ -180,7 +183,7 @@ function renderList() {
   const from = me ? "내 위치" : "지도 가운데";
   const fbtn = ["전체", ...Object.keys(STATUS_COLOR)].map(f => `<button class="b sm${listFilter === f ? " on" : ""}" data-f="${f}">${f} ${n[f]}</button>`).join("");
   const sbtn = ["거리", "구역"].map(s => `<button class="b sm${listSort === s ? " on" : ""}" data-s="${s}">${s === "거리" ? "가까운 순" : "구역별"}</button>`).join("");
-  $("listPanel").innerHTML = `<div class="stick"><div class="s-head"><div><h3>${listFilter === "전체" ? "조사 대상" : esc(listFilter)} ${list.length}곳</h3><p class="muted">${listSort === "거리" ? from + "에서 가까운 순" : "구역별"}</p></div><button class="x" data-a="closeList">✕</button></div>
+  $("listPanel").innerHTML = `<div class="stick"><div class="s-head"><div><h3>${listFilter === "전체" ? "조사 대상" : esc(listFilter)} ${list.length}곳${listFilter === "전체" ? ` <small class="muted">목표 ${GOAL}</small>` : ""}</h3><p class="muted">${listSort === "거리" ? from + "에서 가까운 순" : "구역별"}</p></div><button class="x" data-a="closeList">✕</button></div>
       <div class="chips">${fbtn}</div><div class="chips" style="margin-top:6px">${sbtn}</div></div>`
     + (list.length ? list.map(({ p, st, d }) => `<button class="li" data-id="${esc(p.id)}"><i style="background:${STATUS_COLOR[st]}"></i>
         <span class="nm">${esc(p.name)}<small>${esc(p.zone || "구역 밖")} ${esc(seg[p.id] ? seg[p.id].lv3 : "")}${listFilter === "전체" ? " / " + st : ""}${coding[p.id] ? " / 코딩" : ""}</small></span><span class="ds">${d < 1000 ? Math.round(d) + "m" : (d / 1000).toFixed(1) + "km"}</span></button>`).join("")
@@ -296,7 +299,9 @@ function makeDraft(id) {
     L,
     act: text(r["적극성"]), help: splitList(r["희망 지원"]), helpTop: text(r["가장 원하는 지원"]),
     drink: text(r["1순위 주류"]), soju: text(r["소주 비중"]), nab: text(r["NAB 수요"]),
-    rival: text(r["경쟁 제로"]) || (g.rivalZero ? "있음" : ""),
+    // 저장한 값이 없으면 기존 조사 기록(SKU)에서 읽은 NAB로 미리 채우고 "기록" 표시를 붙인다
+    nabHave: text(r["현재 취급 NAB"]) ? splitList(r["현재 취급 NAB"]) : (nabSeen[id] || []).slice(),
+    nabRec: !text(r["현재 취급 NAB"]) && !!(nabSeen[id] && nabSeen[id].length),
     final: text(r["최종 추천"]), why: text(r["추천 사유"]),
     startedAt: nowStr(),
   };
@@ -308,10 +313,19 @@ const stageOf = (d, key) => d.L.reduce((hi, l, i) => ((key === "orig" ? l.orig :
 function derivedAct(d) { const a = stageOf(d, "orig"); return a >= 2 ? "적극" : a >= 1 ? "보통" : ""; }
 const actOf = d => derivedAct(d) || d.act;
 
+// 경쟁 제로는 현재 취급 NAB에서 계산한다. 테라 제로, 하이트 제로, 기타(칭따오 제로 등)가 있으면 있음, NAB가 없거나 자사 NAB뿐이면 없음
+function rivalOf(d) {
+  if (!d.nabHave.length) return "";
+  return d.nabHave.some(x => x === "테라 제로" || x === "하이트 제로" || x === "기타") ? "있음" : "없음";
+}
+
 function recommend(d) {
   const nab = d.nab === "자주" || d.nab === "가끔", sojuHeavy = d.soju === "절반 이상" || d.soju === "대부분";
   if (!d.nab) return null;
-  if (nab) return { rec: "NAB", note: d.rival === "있음" ? "NAB 수요가 있고 경쟁 제로가 있어 LS 0.0(레몬)부터" : d.rival === "없음" ? "NAB 수요가 있고 경쟁 제로가 없어 CASS 0.0부터" : "NAB 수요가 있습니다. 경쟁 제로 여부를 확인하세요" };
+  if (nab) {
+    const rv = rivalOf(d), own = d.nabHave.filter(x => x === "카스 0.0" || x === "카스 레몬 0.0");
+    return { rec: "NAB", note: own.length ? `NAB 수요가 있고 이미 ${own.join(", ")}을(를) 취급합니다. 다른 NAB 라인으로 넓히는 방향` : rv === "있음" ? "NAB 수요가 있고 경쟁 제로가 있어 LS 0.0(레몬)부터" : rv === "없음" ? "NAB 수요가 있고 경쟁 제로가 없어 CASS 0.0부터" : "NAB 수요가 있습니다. 현재 취급 NAB를 확인하세요" };
+  }
   if (sojuHeavy) return { rec: "후순위", note: "소주 비중이 절반 이상이라 한맥 제안의 우선순위를 낮춥니다" };
   return { rec: "한맥", note: "기본 추천(Korean Lager)" };
 }
@@ -340,6 +354,9 @@ function renderSheet() {
   const info = [p.zone || "구역 밖", g.lv3, g.brands && g.brands.length ? "취급 " + g.brands.join(", ") : ""].filter(Boolean).join("  /  ");
   let html = `<div class="s-head"><div><h3>${esc(p.name)}${rows[selId] ? "" : `<span class="tag">명단 밖</span>`}${coding[selId] ? `<span class="tag cd">사진 코딩</span>` : ""}</h3><p class="muted">${esc(info)}</p></div><button class="x" data-a="close">✕</button></div>
     <div class="st-row">${["완료", "재방문", "제외"].map(s => `<button class="st${d.status === s ? " on" : ""}" data-a="status" data-v="${s}" style="--c:${STATUS_COLOR[s]}">${s === "완료" ? "조사 완료" : s}</button>`).join("")}</div>`;
+  html += rows[selId]
+    ? `<div style="margin-top:10px"><button class="b sm" data-a="tgtoff">후보로 빼기</button></div>`
+    : `<div class="cdnote">${cands[selId] !== undefined ? "후보에 있는 곳입니다" + (cands[selId] ? " (" + esc(cands[selId]) + ")" : "") : "조사 대상 밖입니다"}. <button class="b sm on" data-a="tgton">조사 대상에 넣기</button></div>`;
   if (d.status === "제외") html += excludePanel(d);
   else if (d.status === "재방문") html += revisitPanel(d);
   else if (d.status === "완료") html += donePanel(d, g);
@@ -402,7 +419,7 @@ function donePanel(d, g) {
       return `<span style="display:inline-flex;gap:4px">${bt("help", v, on)}${on ? `<button class="b star${d.helpTop === v ? " on" : ""}" data-a="top" data-v="${esc(v)}" aria-label="가장 원하는 1개">★</button>` : ""}</span>`;
     }).join("")}</div></div>
     <div class="grp"><b>NAB 수요 <small>논알콜 문의나 주문을 받은 적</small></b><div class="seg">${NAB.map(v => bt("nab", v, d.nab === v)).join("")}</div></div>
-    <div class="grp"><b>경쟁 제로 취급${g.rivalZero ? " <small>(명단 기준 있음)</small>" : ""}</b><div class="seg">${RIVAL.map(v => bt("rival", v, d.rival === v)).join("")}</div></div>`;
+    <div class="grp"><b>현재 취급 NAB <small>중복 선택, 없으면 "없음"</small>${d.nabRec ? ` <span class="tag cd">기록</span>` : ""}</b>${d.nabRec ? `<div class="muted" style="margin:0 0 6px">기존 조사 기록(SKU)에서 가져왔습니다. 현장에서 맞는지 확인해 주세요</div>` : ""}<div class="chips">${NABHAVE.map(v => bt("nabh", v, d.nabHave.includes(v))).join("")}</div></div>`;
     const r = recommend(d);
     html += r ? `<div class="rec">규칙 추천 <b>${r.rec}</b><br>${esc(r.note)}</div>
       <div class="grp"><b>최종 추천</b><div class="seg">${FINAL.map(v => bt("final", v, (d.final || r.rec) === v)).join("")}</div></div>
@@ -436,9 +453,14 @@ function onSheetClick(e) {
     case "help": toggle(draft.help, v); if (!draft.help.includes(v) && draft.helpTop === v) draft.helpTop = ""; break;
     case "top": draft.helpTop = draft.helpTop === v ? "" : v; break;
     case "nab": draft.nab = v; break;
-    case "rival": draft.rival = v; break;
+    case "nabh":
+      if (v === "없음") draft.nabHave = draft.nabHave.includes("없음") ? [] : ["없음"];
+      else { draft.nabHave = draft.nabHave.filter(x => x !== "없음"); toggle(draft.nabHave, v); }
+      draft.nabRec = false; break;
     case "final": draft.final = v; break;
     case "save": return save();
+    case "tgton": return setTarget(selId, true);
+    case "tgtoff": return setTarget(selId, false);
     default: return;
   }
   renderSheet();
@@ -461,7 +483,7 @@ function buildItem() {
   const act = actOf(d), miss = [];
   if (!act) miss.push("적극성");
   const rec = recommend(d);
-  if (act && act !== "소극") { if (!d.nab) miss.push("NAB 수요"); if (!d.rival) miss.push("경쟁 제로"); }
+  if (act && act !== "소극") { if (!d.nab) miss.push("NAB 수요"); if (!d.nabHave.length) miss.push("현재 취급 NAB(없으면 없음)"); }
   if (miss.length) return { error: miss.join(", ") + "을(를) 골라 주세요" };
   Object.assign(item, { "상태": "완료", "제외 사유": "", "재방문 사유": "", "재방문 시각": "", "메모": d.memo.trim(),
     "ASIS 단계": "L" + stageOf(d, "orig"), "TOBE 단계": "L" + stageOf(d, "all"), "적극성": act, "1순위 주류": d.drink, "소주 비중": d.soju });
@@ -470,7 +492,7 @@ function buildItem() {
     Object.assign(item, { "희망 지원": "", "가장 원하는 지원": "", "NAB 수요": "", "경쟁 제로": "", "규칙 추천": "", "최종 추천": "", "추천 사유": "" });
   } else {
     const fin = d.final || (rec && rec.rec) || "";
-    Object.assign(item, { "희망 지원": d.help.join(", "), "가장 원하는 지원": d.helpTop, "NAB 수요": d.nab, "경쟁 제로": d.rival,
+    Object.assign(item, { "희망 지원": d.help.join(", "), "가장 원하는 지원": d.helpTop, "NAB 수요": d.nab, "현재 취급 NAB": d.nabHave.join(", "), "경쟁 제로": rivalOf(d),
       "규칙 추천": rec ? rec.rec : "", "최종 추천": fin, "추천 사유": rec && fin !== rec.rec ? d.why.trim() : "" });
   }
   return item;
@@ -495,6 +517,24 @@ function applyLocal(item) {
   paintMark(id); renderCounts();
 }
 
+// 조사 대상에 넣거나 뺀다. 화면에 먼저 반영하고 서버에는 대기열로 보낸다(빼면 시트 행이 후보 탭으로 옮겨진다)
+function setTarget(id, on) {
+  const p = byId[id];
+  if (!on && rows[id] && statusOf(id) !== "미조사" && !confirm(`${p.name}은(는) 이미 ${statusOf(id)} 상태입니다. 후보로 빼도 입력한 내용은 후보 탭에 남습니다. 뺄까요?`)) return;
+  const item = { op: "target", place_id: id, on: on, reason: on ? "" : "현장 판단" };
+  applyTarget(item);
+  queue.push(item); persistQueue(); renderQueue();
+  toast(`${p.name} ${on ? "조사 대상에 넣음" : "후보로 뺌"}`);
+  closeSheet(); paintMark(id); renderCounts();
+  flush();
+}
+function applyTarget(item) {
+  const id = item.place_id, p = byId[id];
+  if (!p) return;
+  if (item.on) { if (!rows[id]) rows[id] = { place_id: id, "상호명": p.name, "구역": p.zone, "층": "추가", "상태": "미조사" }; delete cands[id]; }
+  else { delete rows[id]; cands[id] = item.reason || ""; }
+}
+
 /* ---------------- 전송 대기열 ---------------- */
 
 function persistQueue() { Store.set(QUEUE_KEY, JSON.stringify(queue)); }
@@ -506,6 +546,7 @@ function renderQueue() {
 
 async function send(item) {
   if (fixturePath()) { (window.__saved = window.__saved || []).push(item); await new Promise(r => setTimeout(r, 150)); return; }
+  if (item.op === "target") return void await Api.call("supportTarget", { place_id: item.place_id, on: item.on, reason: item.reason });
   await Api.call("saveSupport", { items: [item] });
 }
 
@@ -519,7 +560,7 @@ async function flush() {
         if (err.network || err.retryable) { toast("통신이 불안정합니다. 입력은 보관되어 있고 나중에 다시 보냅니다"); break; }
         // 서버가 값을 거부했다. 대기열에서 빼고 서버 기준으로 다시 그린다
         const bad = queue.shift(); persistQueue(); renderQueue();
-        toast(`저장이 거부되었습니다 (${(byId[bad.place_id] || {}).name}). ${err.message}`);
+        toast(`${bad.op === "target" ? "이동" : "저장"}이 거부되었습니다 (${(byId[bad.place_id] || {}).name}). ${err.message}`);
         try { await load(); } catch (e2) { /* 다음에 새로고침한다 */ }
       }
     }
@@ -553,10 +594,12 @@ async function load() {
   byId = Object.fromEntries(places.map(p => [p.id, p]));
   seg = data.seg || {};
   coding = data.coding || {};
+  nabSeen = data.nabSeen || {};
+  cands = data.cands || {};
   rows = {};
   (data.rows || []).forEach(r => { if (text(r.place_id)) rows[text(r.place_id)] = r; });
   // 아직 서버에 못 보낸 입력은 화면에 다시 얹는다
-  queue.forEach(it => { if (byId[it.place_id]) applyLocalSilent(it); });
+  queue.forEach(it => { if (!byId[it.place_id]) return; if (it.op === "target") applyTarget(it); else applyLocalSilent(it); });
   hideFail();
   drawZones(); buildMarks(); renderCounts();
   if (!Object.keys(rows).length) fail('조사 대상이 비어 있습니다. 시트 "외국인지원" 탭에 관측완료 150곳이 아직 들어가지 않았습니다.');

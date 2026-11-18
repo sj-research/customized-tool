@@ -37,7 +37,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.27";
+const API_VERSION = "0.29";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전", "segmentation"];
@@ -97,6 +97,8 @@ function doPost(e) {
         return json_({ ok: true, version: API_VERSION, fetchedAt: formatDate_(new Date(), true), data: supportMap_() });
       case "saveSupport":
         return json_(withLock_(() => saveSupport_(req)));
+      case "supportTarget":
+        return json_(withLock_(() => supportTarget_(req)));
       case "setStatus":
         return json_(withLock_(() => setStatus_(req)));
       case "setManage":
@@ -955,7 +957,7 @@ function kpiMap_() {
 const SUPPORT_TAB = "외국인지원";
 const SUPPORT_HEADERS = ["place_id", "상호명", "구역", "층", "상태", "제외 구분", "제외 사유", "메모", "재방문 사유", "재방문 시각",
   "L1 입간판", "L2 메뉴판", "L3 키오스크", "L4 안내물", "L5 온라인", "ASIS 단계", "TOBE 단계",
-  "적극성", "희망 지원", "가장 원하는 지원", "1순위 주류", "소주 비중", "NAB 수요", "경쟁 제로", "규칙 추천", "최종 추천", "추천 사유",
+  "적극성", "희망 지원", "가장 원하는 지원", "1순위 주류", "소주 비중", "NAB 수요", "현재 취급 NAB", "경쟁 제로", "규칙 추천", "최종 추천", "추천 사유",
   "시작 시각", "저장 시각"];
 const SUPPORT_STATUS = ["미조사", "완료", "재방문", "제외"];
 // 제외 사유 코드와 구분. 비대상은 모집단에서 빠지고 소극은 소극 구간으로 센다
@@ -967,6 +969,8 @@ const SUPPORT_LEVEL_COLS = ["L1 입간판", "L2 메뉴판", "L3 키오스크", "
 const SUPPORT_LEVEL_RE = /^(없음|(원래|설치|원래\+설치)(:(영|일|중|기타)(,(영|일|중|기타))*)?)$/;
 const SUPPORT_HELP = ["오프라인 메뉴판", "온라인 메뉴판", "키오스크 다국어화", "먹는 법 안내", "입간판 또는 외부 안내",
   "포스터와 배너와 테이블텐트", "외국어 리뷰 유도", "응대용 번역 문구", "기타"];
+// 현재 취급 NAB. 없음은 다른 값과 함께 쓸 수 없다. 경쟁 제로는 이 값에서 화면이 계산해 같이 보낸다
+const SUPPORT_NAB = ["카스 0.0", "카스 레몬 0.0", "테라 제로", "하이트 제로", "기타", "없음"];
 const SUPPORT_ENUM = {
   "적극성": ["적극", "보통", "소극"],
   "1순위 주류": ["맥주", "소주", "전통주", "위스키 또는 하이볼", "와인", "기타"],
@@ -980,9 +984,28 @@ const SUPPORT_ENUM = {
 const SUPPORT_FREE = ["층", "메모", "재방문 사유", "재방문 시각", "추천 사유", "시작 시각"];
 // 서버가 채우는 칸. 요청에 와도 무시한다
 const SUPPORT_SERVER = ["상호명", "구역", "제외 구분", "저장 시각"];
+// 후보 탭. 조사 대상에서 뺀 곳의 행을 그대로 옮겨 두고(입력값 보존) 사유와 시각을 덧붙인다
+const CAND_TAB = "후보";
+const CAND_EXTRA = ["이동 사유", "이동 시각"];
 const CODING_TAB = "사진코딩";
 const CODING_LEVELS = ["L1 입간판", "L2 메뉴판", "L3 키오스크", "L4 안내물", "L5 온라인"];
 const SEG_BRANDS = { "CASS": "카스", "한맥": "한맥", "테라": "테라", "켈리": "켈리", "클라우드": "클라우드", "필라이트": "필라이트", "레드락": "레드락" };
+
+/**
+ * 조사 기록의 SKU 문장에서 NAB(논알콜 맥주)를 읽는다. 예) "카스, 테라, 테라 제로", "카스 레몬스퀴즈 0.0"
+ * 수요나 메모가 아니라 "그 매장에서 본 병"만 읽도록 SKU 칸과 SKU근거만 쓴다
+ */
+function nabFromText_(raw) {
+  let t = String(raw || "");
+  const found = [];
+  const take = (re, name) => { if (re.test(t)) { found.push(name); t = t.replace(new RegExp(re.source, "g"), " "); } };
+  take(/테라\s*제로/, "테라 제로");
+  take(/하이트\s*제로/, "하이트 제로");
+  take(/카스[^,;/]{0,8}레몬[^,;/]*/, "카스 레몬 0.0");
+  take(/카스\s*(제로|0\.0+)/, "카스 0.0");
+  if (/(논알콜|무알콜|논\s*알콜|제로|0\.0+|non[-\s]?alc)/i.test(t)) found.push("기타");
+  return found;
+}
 
 /** 탭이 없으면 만들고, 열이 모자라면 끝에 붙인다 */
 function supportSheet_() {
@@ -1029,6 +1052,22 @@ function supportMap_() {
       };
     });
   }
+  // 이미 해 둔 조사 기록에서 읽은 NAB(미리 채울 값). observations SKU와 segmentation NAB 열을 합친다
+  const nabSeen = {};
+  const addNab = (id, list) => { if (!id || !list.length) return; nabSeen[id] = Array.from(new Set((nabSeen[id] || []).concat(list))); };
+  if (ss.getSheetByName("observations")) {
+    readSheet_("observations").forEach(o => addNab(text(o.place_id), nabFromText_(text(o["SKU"]) + " , " + text(o["SKU근거"]))));
+  }
+  if (ss.getSheetByName("segmentation")) {
+    readSheet_("segmentation").forEach(r => {
+      const list = [];
+      if (text(r["카스 0.0 - Bottle (330ml)"]).toUpperCase() === "Y") list.push("카스 0.0");
+      if (text(r["카스 레몬 0.0 - Bottle (330ml)"]).toUpperCase() === "Y") list.push("카스 레몬 0.0");
+      if (text(r["테라 제로"]).toUpperCase() === "Y") list.push("테라 제로");
+      if (text(r["하이트 제로"]).toUpperCase() === "Y") list.push("하이트 제로");
+      addNab(text(r.place_id), list);
+    });
+  }
   // 사진을 보고 미리 코딩해 둔 준비 정도. 칸 형식은 "값:언어:사진번호"이고 값 Y는 분명히 보이는 것, ?는 후보다
   const coding = {};
   if (ss.getSheetByName(CODING_TAB)) {
@@ -1045,7 +1084,12 @@ function supportMap_() {
       coding[id] = { levels: levels, memo: text(r["메모"]), n: Number(r["사진수"]) || 0 };
     });
   }
-  return { zones: mapZones_(), places: places, rows: rows, seg: seg, coding: coding };
+  // 후보로 옮겨 둔 곳과 사유(회색 점을 누르면 보여 줄 값)
+  const cands = {};
+  if (ss.getSheetByName(CAND_TAB)) {
+    readSheet_(CAND_TAB).forEach(r => { const id = text(r.place_id); if (id) cands[id] = text(r["이동 사유"]); });
+  }
+  return { zones: mapZones_(), places: places, rows: rows, seg: seg, coding: coding, nabSeen: nabSeen, cands: cands };
 }
 
 /** 요청 한 건의 값을 검사해 칸 이름별 값으로 돌려준다 */
@@ -1066,6 +1110,10 @@ function supportClean_(it) {
       if (v && !SUPPORT_LEVEL_RE.test(v)) throw new InputError(key + " 값이 올바르지 않습니다: " + v);
     } else if (key === "ASIS 단계" || key === "TOBE 단계") {
       if (v && !/^L[0-5]$/.test(v)) throw new InputError(key + " 값이 올바르지 않습니다: " + v);
+    } else if (key === "현재 취급 NAB") {
+      const items = v.split(",").map(x => x.trim()).filter(x => x);
+      items.forEach(x => { if (!SUPPORT_NAB.includes(x)) throw new InputError("현재 취급 NAB 값이 올바르지 않습니다: " + x); });
+      if (items.includes("없음") && items.length > 1) throw new InputError("현재 취급 NAB에서 없음은 다른 값과 함께 쓸 수 없습니다");
     } else if (key === "희망 지원") {
       v.split(",").map(s => s.trim()).filter(s => s).forEach(s => { if (!SUPPORT_HELP.includes(s)) throw new InputError("희망 지원 값이 올바르지 않습니다: " + s); });
     } else if (SUPPORT_ENUM[key]) {
@@ -1127,6 +1175,90 @@ function saveSupport_(req) {
     saved.push(obj);
   });
   return { ok: true, saved: saved };
+}
+
+/** 후보 탭. 외국인지원 탭과 같은 칸에 이동 사유와 이동 시각이 붙는다. 없으면 만들고, 열이 모자라면 붙인다 */
+function candSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  const want = SUPPORT_HEADERS.concat(CAND_EXTRA);
+  let sheet = ss.getSheetByName(CAND_TAB);
+  if (!sheet) {
+    sheet = ss.insertSheet(CAND_TAB);
+    if (sheet.getMaxColumns() < want.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), want.length - sheet.getMaxColumns());
+    sheet.getRange(1, 1, 1, want.length).setValues([want]).setFontWeight("bold");
+    sheet.setFrozenRows(1);
+    return sheet;
+  }
+  const have = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0].map(h => String(h).trim());
+  const missing = want.filter(h => !have.includes(h));
+  if (missing.length) {
+    const start = have.filter(h => h).length + 1;
+    if (sheet.getMaxColumns() < start + missing.length - 1) sheet.insertColumnsAfter(sheet.getMaxColumns(), start + missing.length - 1 - sheet.getMaxColumns());
+    sheet.getRange(1, start, 1, missing.length).setValues([missing]).setFontWeight("bold");
+  }
+  return sheet;
+}
+
+/** 시트에서 place_id가 있는 행 번호(없으면 0)와 머리글 */
+function findSupportRow_(sheet, id) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  const last = sheet.getLastRow();
+  const ids = last > 1 ? sheet.getRange(2, 1, last - 1, 1).getValues().map(r => String(r[0]).trim()) : [];
+  const i = ids.indexOf(id);
+  return { headers: headers, rowNo: i >= 0 ? i + 2 : 0, count: ids.length };
+}
+
+function readSupportRow_(sheet, found) {
+  const vals = sheet.getRange(found.rowNo, 1, 1, found.headers.length).getValues()[0];
+  const obj = {};
+  found.headers.forEach((h, i) => { if (h) obj[h] = vals[i] === null || vals[i] === undefined ? "" : String(vals[i]); });
+  return obj;
+}
+
+function appendSupportRow_(sheet, found, obj) {
+  const rowNo = found.count + 2;
+  if (sheet.getMaxRows() < rowNo) sheet.insertRowsAfter(sheet.getMaxRows(), rowNo - sheet.getMaxRows());
+  sheet.getRange(rowNo, 1, 1, found.headers.length).setNumberFormat("@").setValues([found.headers.map(h => (obj[h] === undefined || obj[h] === null ? "" : obj[h]))]);
+}
+
+/**
+ * 조사 대상에 넣거나 뺀다. { place_id, on: true|false, reason }
+ * 빼면 외국인지원 탭의 행(입력값 포함)이 후보 탭으로 옮겨지고, 넣으면 후보 탭의 행이 돌아온다. 후보에 없던 곳은 새 행(층 "추가", 상태 미조사)을 만든다
+ */
+function supportTarget_(req) {
+  const id = String(req.place_id || "").trim();
+  const on = req.on === true || req.on === "true";
+  const reason = String(req.reason || "").trim();
+  if (reason.length > 60) throw new InputError("사유가 너무 깁니다");
+  const place = readSheet_("places").find(p => String(p.place_id).trim() === id);
+  if (!place) throw new InputError("place_id를 찾을 수 없습니다: " + id);
+  const now = formatDate_(new Date(), true);
+  const main = supportSheet_(), cand = candSheet_();
+  const inMain = findSupportRow_(main, id), inCand = findSupportRow_(cand, id);
+  if (on) {
+    if (inMain.rowNo) return { ok: true, moved: false, row: readSupportRow_(main, inMain) };
+    let obj;
+    if (inCand.rowNo) {
+      obj = readSupportRow_(cand, inCand);
+      cand.deleteRow(inCand.rowNo);
+    } else {
+      obj = { "place_id": id, "상호명": String(place["상호명"] || ""), "구역": String(place.zone_id || ""), "층": "추가", "상태": "미조사" };
+    }
+    if (!obj["상태"]) obj["상태"] = "미조사";
+    obj["저장 시각"] = now;
+    appendSupportRow_(main, findSupportRow_(main, id), obj);
+    return { ok: true, moved: true, row: obj };
+  }
+  if (!inMain.rowNo) return { ok: true, moved: false };
+  const obj = readSupportRow_(main, inMain);
+  main.deleteRow(inMain.rowNo);
+  obj["이동 사유"] = reason || "현장에서 후보로 이동";
+  obj["이동 시각"] = now;
+  // 같은 place_id가 후보에 이미 있으면 덮어쓴다
+  const again = findSupportRow_(cand, id);
+  if (again.rowNo) cand.deleteRow(again.rowNo);
+  appendSupportRow_(cand, findSupportRow_(cand, id), obj);
+  return { ok: true, moved: true };
 }
 
 /**
