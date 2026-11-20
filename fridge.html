@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>냉장고 확인</title>
+<link rel="stylesheet" href="css/support.css?v=0.33.0">
+<link rel="stylesheet" href="css/fridge.css?v=0.33.0">
+<script>
+  window.APP_VERSION = "0.33.0";
+  function showFatal(msg) {
+    var el = document.getElementById("fatal");
+    if (!el) { el = document.createElement("div"); el.id = "fatal"; document.documentElement.appendChild(el); }
+    el.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99;background:#b3261e;color:#fff;padding:10px;font:13px/1.4 sans-serif;white-space:pre-wrap";
+    el.textContent = "오류 (v" + window.APP_VERSION + "): " + msg;
+  }
+  window.addEventListener("error", function (e) { showFatal(e.message + (e.filename ? "\n" + e.filename.split("/").pop() + ":" + e.lineno : "")); });
+  window.addEventListener("unhandledrejection", function (e) { showFatal(String(e.reason && e.reason.message || e.reason)); });
+</script>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="top">
+  <div class="bar">
+    <input id="q" type="search" placeholder="상호명 검색" autocomplete="off">
+    <button id="listBtn">목록</button>
+    <button id="locate" aria-label="내 위치">내 위치</button>
+    <button id="fit">전체</button>
+  </div>
+  <div id="hits" hidden></div>
+  <div id="counts"></div>
+</div>
+
+<section id="sheet" hidden></section>
+<section id="listPanel" hidden></section>
+<button id="queue" hidden></button>
+<div id="toast"></div>
+<div id="error"></div>
+
+<script src="js/common.js?v=0.33.0"></script>
+<script src="js/fridge.js?v=0.33.0"></script>
+</body>
+</html>

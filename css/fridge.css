@@ -1,0 +1,18 @@
+/* 냉장고 확인 화면. support.css 위에 얹는다 */
+.mk.prior::before { background: #0b7285; }
+.mk.todo::before { width: 14px; height: 14px; }
+
+/* 시트 */
+.fr-tags { margin: 2px 0 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.fr-tags .tag { margin-left: 0; }
+.tag.act { background: #e3f4e6; color: #1e6b32; }
+.tag.pri { background: #d8f0f4; color: #0b5a69; }
+.fr-prior { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: #e8f6f8; border: 1px solid #b6dfe6; color: #0b5a69; font-size: 13px; line-height: 1.5; }
+.fr-big { width: 100%; min-height: 58px; margin-top: 12px; border: 0; border-radius: 14px; font-size: 18px; font-weight: 700; color: #fff; }
+.fr-big.none { background: #495057; }
+.fr-big.ok { background: #2b8a3e; }
+.fr-big[disabled] { background: #c6ccd3; }
+.fr-chips .b { min-height: 52px; font-size: 16px; }
+.fr-small { margin-top: 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.fr-small .b { min-height: 36px; font-size: 13.5px; }
+.b.lock { opacity: .75; }
