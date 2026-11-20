@@ -17,7 +17,7 @@ const GOAL = 105; // 현장에서 넣고 빼서 맞출 최종 조사 대상 수
 
 // 준비 정도 단계. 키는 시트 칸 이름과 같다
 const LEVELS = [
-  { col: "L1 입간판", n: 1, name: "L1 입간판", hint: "" },
+  { col: "L1 입간판", n: 1, name: "L1 입간판", hint: "매장 앞에 세우거나 붙인 안내판(메뉴, 안내 포함). 상호 간판만 있으면 없음" },
   { col: "L2 메뉴판", n: 2, name: "L2 메뉴판", hint: "다국어" },
   { col: "L3 키오스크", n: 3, name: "L3 주문 키오스크", hint: "다국어" },
   { col: "L4 안내물", n: 4, name: "L4 오프라인 안내물", hint: "먹는 법, 메뉴 설명, 다국어 포스터와 배너와 테이블텐트" },
@@ -44,7 +44,7 @@ const fixturePath = () => new URLSearchParams(location.search).get("fixture");
 let map = null, homed = false, me = null, meOverlay = null;
 let ZONES = [], features = [], places = [], byId = {}, rows = {}, seg = {}, coding = {}, nabSeen = {}, cands = {}, fetchedAt = "";
 const marks = {};
-let selId = null, draft = null, queue = [], flushing = false;
+let selId = null, draft = null, queue = [], flushing = false, lastMiss = [];
 const layers = { zones: [], labels: [] };
 
 /* ---------------- 도우미 ---------------- */
@@ -427,7 +427,8 @@ function donePanel(d, g) {
       : `<div class="rec none">NAB 수요를 고르면 추천이 자동으로 나옵니다(소주 비중을 고르면 함께 반영됩니다)</div>`;
   }
   html += `<label class="in">메모<textarea id="memo" placeholder="선택">${esc(d.memo)}</textarea></label>
-    <button class="save" data-a="save">완료로 저장</button>`;
+    <p class="muted" style="margin-top:12px">비워 둔 칸이 있어도 저장됩니다. 나중에 다시 열어 채울 수 있습니다</p>
+    <button class="save" data-a="save" style="margin-top:6px">완료로 저장</button>`;
   return html;
 }
 
@@ -480,11 +481,12 @@ function buildItem() {
     return Object.assign(item, { "상태": "재방문", "재방문 사유": d.rvReason, "재방문 시각": d.rvTime.trim(), "메모": d.memo.trim(), "제외 사유": "" });
   }
   if (d.status !== "완료") return { error: "상태를 고르세요" };
+  // 비워 둔 칸이 있어도 저장한다. 비운 칸은 시트에서 빈 값(미입력)으로 남고, 저장 뒤 안내만 한다
   const act = actOf(d), miss = [];
   if (!act) miss.push("적극성");
   const rec = recommend(d);
-  if (act && act !== "소극") { if (!d.nab) miss.push("NAB 수요"); if (!d.nabHave.length) miss.push("현재 취급 NAB(없으면 없음)"); }
-  if (miss.length) return { error: miss.join(", ") + "을(를) 골라 주세요" };
+  if (act !== "소극") { if (!d.nab) miss.push("NAB 수요"); if (!d.nabHave.length) miss.push("현재 취급 NAB"); }
+  lastMiss = miss;
   Object.assign(item, { "상태": "완료", "제외 사유": "", "재방문 사유": "", "재방문 시각": "", "메모": d.memo.trim(),
     "ASIS 단계": "L" + stageOf(d, "orig"), "TOBE 단계": "L" + stageOf(d, "all"), "적극성": act, "1순위 주류": d.drink, "소주 비중": d.soju });
   LEVELS.forEach((lv, i) => { item[lv.col] = levelValue(d.L[i]); });
@@ -499,12 +501,13 @@ function buildItem() {
 }
 
 function save() {
+  lastMiss = [];
   const item = buildItem();
   if (item.error) return toast(item.error);
   const id = selId;
   applyLocal(item);
   queue.push(item); persistQueue(); renderQueue();
-  toast(`${byId[id].name} 저장`);
+  toast(`${byId[id].name} 저장${lastMiss.length ? ` (비운 칸: ${lastMiss.join(", ")})` : ""}`);
   closeSheet();
   flush();
 }
