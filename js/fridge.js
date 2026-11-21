@@ -2,6 +2,7 @@
 // 조사 대상 곳에서 냉장고만 보고 "현재 취급 NAB"를 한 번에 기록한다. 상태(완료)는 건드리지 않는다. 나중에 일괄로 올린다.
 // 여기서 저장한 값은 "현장 확인 시점"의 취급 현황이다. 활동 전 기록은 기존 조사 기록(nabSeen)으로 따로 있고 화면에 참고로만 보여 준다.
 // 입구에서 보이는 입간판(L1)과 다국어 메뉴판(L2)은 보았을 때만 켠다. 켜지 않은 것은 없음이 아니라 비워 둔다.
+// POCM(매장 안팎의 주류 홍보물)은 경쟁사(테라, 테라 제로)와 우리(카스)를 각각 있음, 없음으로 기록한다. 안 골랐으면 비워 둔다.
 // 저장은 시트 "외국인지원" 탭에 saveSupport로 쓰고, 통신이 끊겨도 전송 대기열에 보관했다가 다시 보낸다.
 
 const STATIONS = [
@@ -11,6 +12,7 @@ const STATIONS = [
   { name: "신설동역", lat: 37.57603, lng: 127.02446 },
 ];
 const NAB_LIST = ["카스 0.0", "카스 레몬 0.0", "테라 제로", "하이트 제로", "기타"];
+const POCM = [{ key: "경쟁사 POCM", d: "pr", label: "경쟁사 POCM", sub: "테라, 테라 제로" }, { key: "우리 POCM", d: "po", label: "우리 POCM", sub: "카스" }];
 const REVISIT = ["영업 전", "브레이크 타임", "사장님 부재", "냉장고 안 보임"];
 const KIND_LABEL = { todo: "미확인", prior: "기록 있음", again: "재방문", done: "확인" };
 const KIND_COLOR = { todo: "#e8590c", prior: "#0b7285", again: "#c2255c", done: "#2b8a3e" };
@@ -195,7 +197,7 @@ function goTo(id) {
 function openSheet(id) {
   selId = id;
   const r = rows[id] || {};
-  draft = { nab: splitList(r["현재 취급 NAB"]), l1: !!text(r["L1 입간판"]), l2: !!text(r["L2 메뉴판"]), startedAt: nowStr() };
+  draft = { nab: splitList(r["현재 취급 NAB"]), l1: !!text(r["L1 입간판"]), l2: !!text(r["L2 메뉴판"]), pr: text(r["경쟁사 POCM"]), po: text(r["우리 POCM"]), startedAt: nowStr() };
   Object.keys(marks).forEach(paintMark);
   renderSheet();
   $("sheet").hidden = false; $("listPanel").hidden = true;
@@ -217,15 +219,21 @@ function renderSheet() {
   const prior = nabSeen[id] || [];
   let html = `<div class="s-head"><div><h3>${esc(p.name)}</h3><p class="muted">${esc([p.zone || "구역 밖", g.lv3].filter(Boolean).join("  /  "))}</p>${tags.length ? `<div class="fr-tags">${tags.join("")}</div>` : ""}</div><button class="x" data-a="close">✕</button></div>`;
   if (prior.length) html += `<div class="fr-prior">기존 조사 기록: ${esc(prior.join(", "))}<br>지금 냉장고와 달라도 그대로 기록하세요. 이 기록은 활동 전 자료로 따로 보관됩니다.</div>`;
+  const pocmChanged = pocmDiff(r);
   html += `<h4>냉장고에서 본 NAB <small>여러 개 선택 가능</small></h4>
     <div class="chips fr-chips">${NAB_LIST.map(v => `<button class="b${d.nab.includes(v) ? " on" : ""}" data-a="nab" data-v="${esc(v)}">${esc(v)}</button>`).join("")}</div>
-    <button class="fr-big ok" data-a="saveNab"${d.nab.filter(x => x !== "없음").length ? "" : " disabled"}>${d.nab.filter(x => x !== "없음").length ? "저장 (" + esc(d.nab.join(", ")) + ")" : "NAB를 골라 주세요"}</button>
-    <button class="fr-big none" data-a="saveNone">냉장고에 NAB 없음, 바로 저장</button>
+    <h4>POCM <small>안 골랐으면 비워 둡니다</small></h4>
+    ${POCM.map(x => `<div class="fr-row"><span class="lbl">${esc(x.label)}<small>${esc(x.sub)}</small></span>
+      <button class="b${d[x.d] === "있음" ? " on" : ""}" data-a="${x.d}" data-v="있음">있음</button>
+      <button class="b${d[x.d] === "없음" ? " on" : ""}" data-a="${x.d}" data-v="없음">없음</button></div>`).join("")}
     <h4>입구에서 보였다면 켜세요 <small>안 켠 것은 없음이 아니라 비워 둡니다</small></h4>
     <div class="chips">
       <button class="b${d.l1 ? " on" : ""}${text(r["L1 입간판"]) ? " lock" : ""}" data-a="l1">입간판 있음${text(r["L1 입간판"]) ? " (기존 자료)" : ""}</button>
       <button class="b${d.l2 ? " on" : ""}${text(r["L2 메뉴판"]) ? " lock" : ""}" data-a="l2">다국어 메뉴판 있음${text(r["L2 메뉴판"]) ? " (기존 자료)" : ""}</button>
-    </div>`;
+    </div>
+    <button class="fr-big ok" data-a="saveNab"${d.nab.filter(x => x !== "없음").length ? "" : " disabled"}>${d.nab.filter(x => x !== "없음").length ? "저장 (" + esc(d.nab.join(", ")) + ")" : "NAB를 골라 주세요"}</button>
+    <button class="fr-big none" data-a="saveNone">냉장고에 NAB 없음, 바로 저장</button>`;
+  if (pocmChanged) html += `<div class="fr-small"><button class="b" data-a="savePocm">POCM만 저장 (냉장고는 나중에)</button></div>`;
   if (k !== "done") {
     html += `<h4>냉장고를 못 봤나요?</h4><div class="chips">${REVISIT.map(v => `<button class="b" data-a="revisit" data-v="${esc(v)}">${esc(v)}</button>`).join("")}</div>`;
   } else {
@@ -242,10 +250,12 @@ function onSheetClick(e) {
   switch (a) {
     case "close": return closeSheet();
     case "nab": { const i = draft.nab.indexOf(v); i >= 0 ? draft.nab.splice(i, 1) : draft.nab.push(v); draft.nab = draft.nab.filter(x => x !== "없음"); break; }
+    case "pr": case "po": draft[a] = draft[a] === v ? "" : v; break;
     case "l1": if (!text((rows[selId] || {})["L1 입간판"])) draft.l1 = !draft.l1; break;
     case "l2": if (!text((rows[selId] || {})["L2 메뉴판"])) draft.l2 = !draft.l2; break;
     case "saveNab": return commit(draft.nab.filter(x => x !== "없음"));
     case "saveNone": return commit(["없음"]);
+    case "savePocm": return commitPocm();
     case "revisit": return commitRevisit(v);
     case "clear": return commitClear();
     default: return;
@@ -260,15 +270,26 @@ function levelPart(item, r) {
   if (draft.l1 && !text(r["L1 입간판"])) item["L1 입간판"] = "원래";
   if (draft.l2 && !text(r["L2 메뉴판"])) item["L2 메뉴판"] = "원래";
 }
+// 화면에서 바꾼 POCM만 보낸다. 기존 값을 비우면 빈 값으로 지운다
+function pocmDiff(r) { return POCM.some(x => text(draft[x.d]) !== text(r[x.key])); }
+function pocmPart(item, r) {
+  POCM.forEach(x => { if (text(draft[x.d]) !== text(r[x.key])) item[x.key] = draft[x.d]; });
+}
 function commit(list) {
   const id = selId, r = rows[id] || {};
   const item = { place_id: id, "시작 시각": draft.startedAt, "현재 취급 NAB": list.join(", "), "경쟁 제로": rival(list) };
-  levelPart(item, r);
+  levelPart(item, r); pocmPart(item, r);
   push(item, `${byId[id].name} 저장 (${item["현재 취급 NAB"]})`);
 }
 function commitRevisit(reason) {
-  const id = selId;
-  push({ place_id: id, "시작 시각": draft.startedAt, "상태": "재방문", "재방문 사유": reason }, `${byId[id].name} 재방문으로 저장`);
+  const id = selId, item = { place_id: id, "시작 시각": draft.startedAt, "상태": "재방문", "재방문 사유": reason };
+  pocmPart(item, rows[id] || {});
+  push(item, `${byId[id].name} 재방문으로 저장`);
+}
+function commitPocm() {
+  const id = selId, item = { place_id: id, "시작 시각": draft.startedAt };
+  pocmPart(item, rows[id] || {});
+  push(item, `${byId[id].name} POCM 저장`);
 }
 function commitClear() {
   const id = selId;

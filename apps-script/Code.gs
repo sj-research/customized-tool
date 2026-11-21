@@ -37,7 +37,7 @@
  *   CLAUDE_EFFORT      선택. 기본 medium (low, medium, high)
  */
 
-const API_VERSION = "0.29";
+const API_VERSION = "0.30";
 const READ_SHEETS = ["zones", "places", "observations", "actions"];
 // 없어도 오류 없이 빈 배열로 돌려주는 탭. setupSchema 실행과 blog 가져오기 전에도 API가 동작하게 한다
 const OPTIONAL_SHEETS = ["visits", "routing_plans", "blog", "사전", "segmentation"];
@@ -957,7 +957,7 @@ function kpiMap_() {
 const SUPPORT_TAB = "외국인지원";
 const SUPPORT_HEADERS = ["place_id", "상호명", "구역", "층", "상태", "제외 구분", "제외 사유", "메모", "재방문 사유", "재방문 시각",
   "L1 입간판", "L2 메뉴판", "L3 키오스크", "L4 안내물", "L5 온라인", "ASIS 단계", "TOBE 단계",
-  "적극성", "희망 지원", "가장 원하는 지원", "1순위 주류", "소주 비중", "NAB 수요", "현재 취급 NAB", "경쟁 제로", "규칙 추천", "최종 추천", "추천 사유",
+  "적극성", "희망 지원", "가장 원하는 지원", "1순위 주류", "소주 비중", "NAB 수요", "현재 취급 NAB", "경쟁 제로", "경쟁사 POCM", "우리 POCM", "규칙 추천", "최종 추천", "추천 사유",
   "시작 시각", "저장 시각"];
 const SUPPORT_STATUS = ["미조사", "완료", "재방문", "제외"];
 // 제외 사유 코드와 구분. 비대상은 모집단에서 빠지고 소극은 소극 구간으로 센다
@@ -977,6 +977,9 @@ const SUPPORT_ENUM = {
   "소주 비중": ["거의 없다", "절반 미만", "절반 이상", "대부분"],
   "NAB 수요": ["자주", "가끔", "없음"],
   "경쟁 제로": ["있음", "없음"],
+  // POCM은 매장 안팎의 주류 홍보물이다. 경쟁사는 테라와 테라 제로, 우리는 카스. 못 본 것은 비워 둔다
+  "경쟁사 POCM": ["있음", "없음"],
+  "우리 POCM": ["있음", "없음"],
   "규칙 추천": ["한맥", "NAB", "후순위"],
   "최종 추천": ["한맥", "NAB", "후순위"],
   "가장 원하는 지원": SUPPORT_HELP,
