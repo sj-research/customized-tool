@@ -5,18 +5,91 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>상권 조사 도구</title>
 <style>
-  body { margin: 0; padding: 24px; font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; color: #222; }
-  a { display: block; padding: 16px; margin-top: 12px; border: 1px solid #ddd; border-radius: 10px; color: #1f3a5f; text-decoration: none; font-weight: 600; }
+  :root { --bg: #f4f6f9; --card: #fff; --line: #dde2e9; --ink: #1c2430; --sub: #5b6676; --brand: #1f3a5f; --tag-bg: #e6edf6; --tag-ink: #1f3a5f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #11161d; --card: #1a212b; --line: #2b3441; --ink: #e8edf4; --sub: #9aa6b6; --brand: #8fb4e8; --tag-bg: #25324a; --tag-ink: #b9d0f2; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; line-height: 1.5; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .lead { margin: 0 0 20px; color: var(--sub); font-size: 14px; }
+  h2 { margin: 28px 0 4px; font-size: 13px; letter-spacing: .02em; color: var(--sub); font-weight: 700; }
+  .grid { display: grid; gap: 10px; grid-template-columns: 1fr; margin-top: 8px; }
+  @media (min-width: 620px) { .grid { grid-template-columns: 1fr 1fr; } }
+  a.card { display: block; padding: 14px 16px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; color: inherit; text-decoration: none; }
+  a.card:hover, a.card:focus-visible { border-color: var(--brand); outline: none; }
+  .t { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; color: var(--brand); }
+  .tag { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--tag-bg); color: var(--tag-ink); }
+  .d { margin: 4px 0 0; font-size: 13.5px; color: var(--sub); }
+  .u { margin: 6px 0 0; font-size: 12px; color: var(--sub); }
+  .u code { font-family: ui-monospace, Consolas, monospace; }
+  .note { margin-top: 28px; font-size: 12.5px; color: var(--sub); }
 </style>
 </head>
 <body>
-<h1>상권 조사 도구</h1>
-<p>개발 중입니다.</p>
-<a href="prep.html">준비 모드</a>
-<a href="field.html">현장 모드</a>
-<a href="zones.html">구역 분석</a>
-<a href="grid.html">격자 분석 (생활인구)</a>
-<a href="stt-test.html">아이폰 음성 인식 테스트</a>
-<a href="api-test.html">시트 연결 테스트</a>
+<main>
+  <h1>상권 조사 도구</h1>
+  <p class="lead">동대문 상권 조사에 쓰는 화면 모음입니다. 폰으로 열면 현장에서 바로 쓸 수 있습니다.</p>
+
+  <h2>현장 조사</h2>
+  <div class="grid">
+    <a class="card" href="fridge.html">
+      <div class="t">냉장고 확인 <span class="tag">현장</span></div>
+      <p class="d">조사 대상의 냉장고를 보고 현재 취급 NAB와 경쟁사 POCM, 우리 POCM을 기록합니다. 확인할 곳만 주황으로 남습니다.</p>
+      <p class="u"><code>fridge.html</code></p>
+    </a>
+    <a class="card" href="support.html">
+      <div class="t">외국인 지원 조사 <span class="tag">현장</span></div>
+      <p class="d">다국어 준비 정도(L1에서 L5)와 업주 니즈를 매장별로 입력합니다. 조사 대상에 넣고 빼는 것도 여기서 합니다.</p>
+      <p class="u"><code>support.html</code></p>
+    </a>
+    <a class="card" href="field.html">
+      <div class="t">현장 지도 <span class="tag">현장</span></div>
+      <p class="d">업장 진행상태(미조사, 완료, 재방문, 제외)를 지도에서 확인하고 현장 조사를 기록합니다. 설정은 이 화면에 먼저 넣습니다.</p>
+      <p class="u"><code>field.html</code></p>
+    </a>
+  </div>
+
+  <h2>결과와 분석</h2>
+  <div class="grid">
+    <a class="card" href="results.html">
+      <div class="t">결과 정리 <span class="tag">지도</span></div>
+      <p class="d">구역 위에 KPI 사입 항목을 POC별 도넛으로 보여 줍니다. 항목을 누르면 해당 POC만 남습니다.</p>
+      <p class="u"><code>results.html</code></p>
+    </a>
+    <a class="card" href="zones.html">
+      <div class="t">구역 분석 <span class="tag">지도</span></div>
+      <p class="d">구역(D1에서 D4, S1)과 업장을 지도에서 확인합니다.</p>
+      <p class="u"><code>zones.html</code></p>
+    </a>
+    <a class="card" href="grid.html">
+      <div class="t">격자 분석 <span class="tag">지도</span></div>
+      <p class="d">서울 생활인구 250m 격자를 내 구역과 행정동에 겹쳐 봅니다.</p>
+      <p class="u"><code>grid.html</code></p>
+    </a>
+    <a class="card" href="prep.html">
+      <div class="t">구역 변천 <span class="tag">지도</span></div>
+      <p class="d">구역을 세 시점으로 같은 축척에 맞춰 비교합니다. 발표 장표의 지도 3컷용입니다.</p>
+      <p class="u"><code>prep.html</code></p>
+    </a>
+  </div>
+
+  <h2>점검</h2>
+  <div class="grid">
+    <a class="card" href="api-test.html">
+      <div class="t">시트 연결 테스트</div>
+      <p class="d">Apps Script 주소와 토큰이 맞는지 확인합니다.</p>
+      <p class="u"><code>api-test.html</code></p>
+    </a>
+    <a class="card" href="stt-test.html">
+      <div class="t">음성 인식 테스트</div>
+      <p class="d">아이폰에서 음성 인식이 되는지 확인합니다.</p>
+      <p class="u"><code>stt-test.html</code></p>
+    </a>
+  </div>
+
+  <p class="note">Apps Script 주소, 토큰, 카카오 키는 이 저장소에 없고 기기 설정(현장 지도 화면)에 저장됩니다. 한 번 넣으면 모든 화면에서 같이 씁니다.</p>
+</main>
 </body>
 </html>
