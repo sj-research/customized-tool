@@ -25,7 +25,7 @@ const splitList = v => text(v).split(",").map(s => s.trim()).filter(Boolean);
 const nowStr = () => { const d = new Date(), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
 
 let map = null, homed = false, me = null, meOverlay = null;
-let ZONES = [], features = [], places = [], byId = {}, rows = {}, seg = {}, nabSeen = {};
+let ZONES = [], features = [], places = [], byId = {}, rows = {}, seg = {}, nabSeen = {}, coding = {};
 const marks = {};
 const layers = { zones: [], labels: [] };
 let selId = null, draft = null, queue = [], flushing = false;
@@ -192,6 +192,14 @@ function goTo(id) {
   openSheet(id);
 }
 
+// 전수조사 사진에서 읽은 입간판(L1) 결과. 참고로만 보여 주고 토글은 현장에서 본 것으로 켠다
+function signPrior(id) {
+  const c = ((coding[id] || {}).levels || {}).L1;
+  if (!c || (c.v !== "Y" && c.v !== "?")) return "";
+  const lang = c.lang ? ` (${c.lang})` : "", note = text(c.note).slice(0, 70);
+  return c.v === "Y" ? `있음${lang}` : `후보${lang}, 사진에서 확실하지 않음`;
+}
+
 /* ---------------- 시트 ---------------- */
 
 function openSheet(id) {
@@ -227,6 +235,7 @@ function renderSheet() {
       <button class="b${d[x.d] === "있음" ? " on" : ""}" data-a="${x.d}" data-v="있음">있음</button>
       <button class="b${d[x.d] === "없음" ? " on" : ""}" data-a="${x.d}" data-v="없음">없음</button></div>`).join("")}
     <h4>입구에서 보였다면 켜세요 <small>안 켠 것은 없음이 아니라 비워 둡니다</small></h4>
+    ${signPrior(id) ? `<div class="fr-prior">입간판 기존 조사(전수조사 사진): ${esc(signPrior(id))}<br>지금 입구 기준으로 확인해서 켜 주세요.</div>` : (coding[id] ? `<div class="muted">입간판 기존 조사: 사진에서 확인된 것 없음</div>` : "")}
     <div class="chips">
       <button class="b${d.l1 ? " on" : ""}${text(r["L1 입간판"]) ? " lock" : ""}" data-a="l1">입간판 있음${text(r["L1 입간판"]) ? " (기존 자료)" : ""}</button>
       <button class="b${d.l2 ? " on" : ""}${text(r["L2 메뉴판"]) ? " lock" : ""}" data-a="l2">다국어 메뉴판 있음${text(r["L2 메뉴판"]) ? " (기존 자료)" : ""}</button>
@@ -345,6 +354,7 @@ async function load() {
   byId = Object.fromEntries(places.map(p => [p.id, p]));
   seg = data.seg || {};
   nabSeen = data.nabSeen || {};
+  coding = data.coding || {};
   rows = {};
   (data.rows || []).forEach(r => { if (text(r.place_id)) rows[text(r.place_id)] = r; });
   // 아직 서버에 못 보낸 입력은 화면에 다시 얹는다
