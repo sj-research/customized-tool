@@ -120,3 +120,7 @@ label.in textarea { min-height: 64px; resize: vertical; }
 #counts { overflow-x: auto; scrollbar-width: none; }
 .cnt.goal { background: #1f3a5f; color: #fff; }
 .cnt.goal.ok { background: #2b8a3e; }
+.prow { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.prow .lbl { flex: 1; font-size: 14px; font-weight: 700; line-height: 1.25; color: #1c2430; }
+.prow .lbl small { display: block; font-weight: 400; font-size: 12px; color: #889; }
+.prow .b { min-width: 72px; min-height: 44px; }

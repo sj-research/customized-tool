@@ -32,7 +32,7 @@ const EXCLUDE = [
 const REVISIT = ["사장님 부재", "브레이크 타임", "영업 전", "기타"];
 const HELP = ["오프라인 메뉴판", "온라인 메뉴판", "키오스크 다국어화", "먹는 법 안내", "입간판 또는 외부 안내", "포스터와 배너와 테이블텐트", "외국어 리뷰 유도", "응대용 번역 문구", "기타"];
 const DRINK = ["맥주", "소주", "전통주", "위스키 또는 하이볼", "와인", "기타"];
-const SOJU = ["거의 없다", "절반 미만", "절반 이상", "대부분"];
+const POCM = [{ key: "경쟁사 POCM", d: "pr", label: "경쟁사 POCM", sub: "테라, 테라 제로 홍보물" }, { key: "우리 POCM", d: "po", label: "우리 POCM", sub: "카스 홍보물" }];
 const NAB = ["자주", "가끔", "없음"];
 const NABHAVE = ["카스 0.0", "카스 레몬 0.0", "테라 제로", "하이트 제로", "기타", "없음"];
 const ACT = ["적극", "보통", "소극"];
@@ -298,10 +298,11 @@ function makeDraft(id) {
     excl: text(r["제외 사유"]), memo: text(r["메모"]), rvReason: text(r["재방문 사유"]), rvTime: text(r["재방문 시각"]),
     L,
     act: text(r["적극성"]), help: splitList(r["희망 지원"]), helpTop: text(r["가장 원하는 지원"]),
-    drink: text(r["1순위 주류"]), soju: text(r["소주 비중"]), nab: text(r["NAB 수요"]),
-    // 저장한 값이 없으면 기존 조사 기록(SKU)에서 읽은 NAB로 미리 채우고 "기록" 표시를 붙인다
-    nabHave: text(r["현재 취급 NAB"]) ? splitList(r["현재 취급 NAB"]) : (nabSeen[id] || []).slice(),
-    nabRec: !text(r["현재 취급 NAB"]) && !!(nabSeen[id] && nabSeen[id].length),
+    drink: text(r["1순위 주류"]), nab: text(r["NAB 수요"]),
+    // 현재 취급 NAB는 현장에서 본 값만 담는다. 기존 조사 기록(SKU)은 활동 전 자료라서 미리 채우지 않고 참고로만 보여 준다
+    nabHave: splitList(r["현재 취급 NAB"]),
+    nabPrior: text(r["현재 취급 NAB"]) ? [] : (nabSeen[id] || []).slice(),
+    pr: text(r["경쟁사 POCM"]), po: text(r["우리 POCM"]),
     final: text(r["최종 추천"]), why: text(r["추천 사유"]),
     startedAt: nowStr(),
   };
@@ -320,13 +321,12 @@ function rivalOf(d) {
 }
 
 function recommend(d) {
-  const nab = d.nab === "자주" || d.nab === "가끔", sojuHeavy = d.soju === "절반 이상" || d.soju === "대부분";
+  const nab = d.nab === "자주" || d.nab === "가끔";
   if (!d.nab) return null;
   if (nab) {
     const rv = rivalOf(d), own = d.nabHave.filter(x => x === "카스 0.0" || x === "카스 레몬 0.0");
     return { rec: "NAB", note: own.length ? `NAB 수요가 있고 이미 ${own.join(", ")}을(를) 취급합니다. 다른 NAB 라인으로 넓히는 방향` : rv === "있음" ? "NAB 수요가 있고 경쟁 제로가 있어 LS 0.0(레몬)부터" : rv === "없음" ? "NAB 수요가 있고 경쟁 제로가 없어 CASS 0.0부터" : "NAB 수요가 있습니다. 현재 취급 NAB를 확인하세요" };
   }
-  if (sojuHeavy) return { rec: "후순위", note: "소주 비중이 절반 이상이라 한맥 제안의 우선순위를 낮춥니다" };
   return { rec: "한맥", note: "기본 추천(Korean Lager)" };
 }
 
@@ -408,24 +408,29 @@ function donePanel(d, g) {
   html += `<h4>2 업주 니즈</h4>`;
   if (auto) html += `<div class="badge">적극성 ${auto} (준비 정도로 자동 판정)</div>`;
   else html += `<div class="grp"><b>외국인 준비에 대한 적극성</b>${chips("act", ACT, v => d.act === v)}</div>`;
-  const sojuHint = g.lv3 === "EASY MEAL" ? `<div class="muted" style="margin:0 0 6px">국밥류(EASY MEAL)는 소주 비중이 클 가능성이 있습니다(추정). 확인되면 눌러 주세요</div>` : "";
-  html += `<div class="grp"><b>가장 많이 나가는 주류 <small>선택</small></b>${chips("drink", DRINK, v => d.drink === v)}</div>
-    <div class="grp"><b>소주 비중 <small>선택, 가볍게</small></b>${sojuHint}<div class="seg">${SOJU.map(v => bt("soju", v, d.soju === v)).join("")}</div></div>`;
+  html += `<div class="grp"><b>가장 많이 나가는 주류 <small>선택</small></b>${chips("drink", DRINK, v => d.drink === v)}</div>`;
   if (act === "소극") {
     html += `<div class="rec none">소극으로 기록합니다. 희망 지원과 제품 추천은 묻지 않습니다</div>`;
   } else {
     html += `<div class="grp"><b>희망하는 지원 <small>여러 개 선택, 별표는 가장 원하는 1개</small></b><div class="chips">${HELP.map(v => {
       const on = d.help.includes(v);
       return `<span style="display:inline-flex;gap:4px">${bt("help", v, on)}${on ? `<button class="b star${d.helpTop === v ? " on" : ""}" data-a="top" data-v="${esc(v)}" aria-label="가장 원하는 1개">★</button>` : ""}</span>`;
-    }).join("")}</div></div>
+    }).join("")}</div></div>`;
+  }
+
+  html += `<h4>3 NAB <small>업주 수요와 냉장고에서 본 NAB</small></h4>
     <div class="grp"><b>NAB 수요 <small>논알콜 문의나 주문을 받은 적</small></b><div class="seg">${NAB.map(v => bt("nab", v, d.nab === v)).join("")}</div></div>
-    <div class="grp"><b>현재 취급 NAB <small>중복 선택, 없으면 "없음"</small>${d.nabRec ? ` <span class="tag cd">기록</span>` : ""}</b>${d.nabRec ? `<div class="muted" style="margin:0 0 6px">기존 조사 기록(SKU)에서 가져왔습니다. 현장에서 맞는지 확인해 주세요</div>` : ""}<div class="chips">${NABHAVE.map(v => bt("nabh", v, d.nabHave.includes(v))).join("")}</div></div>`;
+    <div class="grp"><b>현재 취급 NAB <small>중복 선택, 없으면 "없음"</small></b>${d.nabPrior.length ? `<div class="muted" style="margin:0 0 6px">기존 조사 기록: ${esc(d.nabPrior.join(", "))} (활동 전 자료라 미리 채우지 않았습니다. 지금 냉장고 기준으로 골라 주세요)</div>` : ""}<div class="chips">${NABHAVE.map(v => bt("nabh", v, d.nabHave.includes(v))).join("")}</div></div>`;
+  if (act !== "소극") {
     const r = recommend(d);
     html += r ? `<div class="rec">규칙 추천 <b>${r.rec}</b><br>${esc(r.note)}</div>
       <div class="grp"><b>최종 추천</b><div class="seg">${FINAL.map(v => bt("final", v, (d.final || r.rec) === v)).join("")}</div></div>
       ${(d.final && d.final !== r.rec) ? `<label class="in">추천을 바꾼 사유<input id="why" type="text" value="${esc(d.why)}" placeholder="한 줄" autocomplete="off"></label>` : ""}`
-      : `<div class="rec none">NAB 수요를 고르면 추천이 자동으로 나옵니다(소주 비중을 고르면 함께 반영됩니다)</div>`;
+      : `<div class="rec none">NAB 수요를 고르면 추천이 자동으로 나옵니다</div>`;
   }
+
+  html += `<h4>4 POCM <small>매장 안팎의 주류 홍보물. 안 골랐으면 비워 둡니다</small></h4>
+    ${POCM.map(x => `<div class="prow"><span class="lbl">${esc(x.label)}<small>${esc(x.sub)}</small></span>${bt(x.d, "있음", d[x.d] === "있음")}${bt(x.d, "없음", d[x.d] === "없음")}</div>`).join("")}`;
   html += `<label class="in">메모<textarea id="memo" placeholder="선택">${esc(d.memo)}</textarea></label>
     <p class="muted" style="margin-top:12px">비워 둔 칸이 있어도 저장됩니다. 나중에 다시 열어 채울 수 있습니다</p>
     <button class="save" data-a="save" style="margin-top:6px">완료로 저장</button>`;
@@ -450,14 +455,14 @@ function onSheetClick(e) {
     case "lang": toggle(draft.L[i].langs, v); draft.coded[i] = false; break;
     case "act": draft.act = v; break;
     case "drink": draft.drink = v; break;
-    case "soju": draft.soju = v; break;
+    case "pr": case "po": draft[a] = draft[a] === v ? "" : v; break;
     case "help": toggle(draft.help, v); if (!draft.help.includes(v) && draft.helpTop === v) draft.helpTop = ""; break;
     case "top": draft.helpTop = draft.helpTop === v ? "" : v; break;
     case "nab": draft.nab = v; break;
     case "nabh":
       if (v === "없음") draft.nabHave = draft.nabHave.includes("없음") ? [] : ["없음"];
       else { draft.nabHave = draft.nabHave.filter(x => x !== "없음"); toggle(draft.nabHave, v); }
-      draft.nabRec = false; break;
+      break;
     case "final": draft.final = v; break;
     case "save": return save();
     case "tgton": return setTarget(selId, true);
@@ -485,16 +490,20 @@ function buildItem() {
   const act = actOf(d), miss = [];
   if (!act) miss.push("적극성");
   const rec = recommend(d);
-  if (act !== "소극") { if (!d.nab) miss.push("NAB 수요"); if (!d.nabHave.length) miss.push("현재 취급 NAB"); }
+  if (act !== "소극" && !d.nab) miss.push("NAB 수요");
+  if (!d.nabHave.length) miss.push("현재 취급 NAB");
+  if (!d.pr) miss.push("경쟁사 POCM");
+  if (!d.po) miss.push("우리 POCM");
   lastMiss = miss;
   Object.assign(item, { "상태": "완료", "제외 사유": "", "재방문 사유": "", "재방문 시각": "", "메모": d.memo.trim(),
-    "ASIS 단계": "L" + stageOf(d, "orig"), "TOBE 단계": "L" + stageOf(d, "all"), "적극성": act, "1순위 주류": d.drink, "소주 비중": d.soju });
+    "ASIS 단계": "L" + stageOf(d, "orig"), "TOBE 단계": "L" + stageOf(d, "all"), "적극성": act, "1순위 주류": d.drink,
+    "NAB 수요": d.nab, "현재 취급 NAB": d.nabHave.join(", "), "경쟁 제로": rivalOf(d), "경쟁사 POCM": d.pr, "우리 POCM": d.po });
   LEVELS.forEach((lv, i) => { item[lv.col] = levelValue(d.L[i]); });
   if (act === "소극") {
-    Object.assign(item, { "희망 지원": "", "가장 원하는 지원": "", "NAB 수요": "", "경쟁 제로": "", "규칙 추천": "", "최종 추천": "", "추천 사유": "" });
+    Object.assign(item, { "희망 지원": "", "가장 원하는 지원": "", "규칙 추천": "", "최종 추천": "", "추천 사유": "" });
   } else {
     const fin = d.final || (rec && rec.rec) || "";
-    Object.assign(item, { "희망 지원": d.help.join(", "), "가장 원하는 지원": d.helpTop, "NAB 수요": d.nab, "현재 취급 NAB": d.nabHave.join(", "), "경쟁 제로": rivalOf(d),
+    Object.assign(item, { "희망 지원": d.help.join(", "), "가장 원하는 지원": d.helpTop,
       "규칙 추천": rec ? rec.rec : "", "최종 추천": fin, "추천 사유": rec && fin !== rec.rec ? d.why.trim() : "" });
   }
   return item;
