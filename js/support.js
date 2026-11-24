@@ -1,6 +1,6 @@
 // 외국인 지원 조사 입력 화면 (11월 17일)
 // 관측완료 150곳을 주황 "미조사"로 하이라이트하고, 나머지 모든 상호는 회색으로 깔아 둔다.
-// 매장을 누르면 아래에서 시트가 올라온다. 1차원은 상태(조사 완료, 재방문, 제외), 완료를 고르면 2차원 준비 정도, 3차원 업주 니즈가 이어진다.
+// 매장을 누르면 아래에서 시트가 올라온다. 1차원은 상태(조사 완료, 재방문, 제외), 완료를 고르면 외국인 준비에 대한 적극성, 희망하는 다국어 지원, NAB에 대한 수요의 정도가 이어진다.
 // 입력은 시트의 "외국인지원" 탭에 한 매장 한 행으로 쌓인다. places 진행상태는 건드리지 않는다.
 // 통신이 끊겨도 입력이 사라지지 않도록 전송 대기열을 두고 다시 보낸다.
 
@@ -17,11 +17,11 @@ const GOAL = 105; // 현장에서 넣고 빼서 맞출 최종 조사 대상 수
 
 // 준비 정도 단계. 키는 시트 칸 이름과 같다
 const LEVELS = [
-  { col: "L1 입간판", n: 1, name: "L1 입간판", hint: "매장 앞에 세우거나 붙인 안내판(메뉴, 안내 포함). 상호 간판만 있으면 없음" },
-  { col: "L2 메뉴판", n: 2, name: "L2 메뉴판", hint: "다국어" },
-  { col: "L3 키오스크", n: 3, name: "L3 주문 키오스크", hint: "다국어" },
-  { col: "L4 안내물", n: 4, name: "L4 오프라인 안내물", hint: "먹는 법, 메뉴 설명, 다국어 포스터와 배너와 테이블텐트" },
-  { col: "L5 온라인", n: 5, name: "L5 온라인 연계", hint: "자체 홈페이지, 네이버와 구글 리뷰 연계" },
+  { col: "L1 입간판", n: 1, name: "입간판", hint: "매장 앞에 세우거나 붙인 안내판(메뉴, 안내 포함). 상호 간판만 있으면 없음" },
+  { col: "L2 메뉴판", n: 2, name: "메뉴판", hint: "다국어" },
+  { col: "L3 키오스크", n: 3, name: "주문 키오스크", hint: "다국어" },
+  { col: "L4 안내물", n: 4, name: "오프라인 안내물", hint: "먹는 법, 메뉴 설명, 다국어 포스터와 배너와 테이블텐트" },
+  { col: "L5 온라인", n: 5, name: "온라인 연계", hint: "자체 홈페이지, 네이버와 구글 리뷰 연계" },
 ];
 const LANGS = ["영", "일", "중", "기타"];
 const EXCLUDE = [
@@ -31,8 +31,6 @@ const EXCLUDE = [
 ];
 const REVISIT = ["사장님 부재", "브레이크 타임", "영업 전", "기타"];
 const HELP = ["오프라인 메뉴판", "온라인 메뉴판", "키오스크 다국어화", "먹는 법 안내", "입간판 또는 외부 안내", "포스터와 배너와 테이블텐트", "외국어 리뷰 유도", "응대용 번역 문구", "기타"];
-const DRINK = ["맥주", "소주", "전통주", "위스키 또는 하이볼", "와인", "기타"];
-const POCM = [{ key: "경쟁사 POCM", d: "pr", label: "경쟁사 POCM", sub: "테라, 테라 제로 홍보물" }, { key: "우리 POCM", d: "po", label: "우리 POCM", sub: "카스 홍보물" }];
 const NAB = ["자주", "가끔", "없음"];
 const NABHAVE = ["카스 0.0", "카스 레몬 0.0", "테라 제로", "하이트 제로", "기타", "없음"];
 const ACT = ["적극", "보통", "소극"];
@@ -298,11 +296,10 @@ function makeDraft(id) {
     excl: text(r["제외 사유"]), memo: text(r["메모"]), rvReason: text(r["재방문 사유"]), rvTime: text(r["재방문 시각"]),
     L,
     act: text(r["적극성"]), help: splitList(r["희망 지원"]), helpTop: text(r["가장 원하는 지원"]),
-    drink: text(r["1순위 주류"]), nab: text(r["NAB 수요"]),
+    nab: text(r["NAB 수요"]),
     // 현재 취급 NAB는 현장에서 본 값만 담는다. 기존 조사 기록(SKU)은 활동 전 자료라서 미리 채우지 않고 참고로만 보여 준다
     nabHave: splitList(r["현재 취급 NAB"]),
     nabPrior: text(r["현재 취급 NAB"]) ? [] : (nabSeen[id] || []).slice(),
-    pr: text(r["경쟁사 POCM"]), po: text(r["우리 POCM"]),
     final: text(r["최종 추천"]), why: text(r["추천 사유"]),
     startedAt: nowStr(),
   };
@@ -396,7 +393,7 @@ function levelRow(d, i) {
 
 function donePanel(d, g) {
   const asis = stageOf(d, "orig"), tobe = stageOf(d, "all"), auto = derivedAct(d), act = actOf(d);
-  let html = `<h4>1 준비 정도 <small>켠 것만 있음으로 기록됩니다. 아무것도 없으면 그대로 두세요</small></h4>`;
+  let html = `<h4>1 외국인 준비에 대한 적극성 <small>켠 것만 있음으로 기록됩니다. 아무것도 없으면 그대로 두세요</small></h4>`;
   const cdm = coding[selId];
   if (cdm) {
     const any = Object.keys(cdm.levels || {}).length;
@@ -404,33 +401,30 @@ function donePanel(d, g) {
   }
   html += LEVELS.map((_, i) => levelRow(d, i)).join("");
   html += `<div class="badge">개입 전 L${asis}${tobe !== asis ? `, 설치 후 L${tobe}` : ""}</div>`;
-
-  html += `<h4>2 업주 니즈</h4>`;
   if (auto) html += `<div class="badge">적극성 ${auto} (준비 정도로 자동 판정)</div>`;
-  else html += `<div class="grp"><b>외국인 준비에 대한 적극성</b>${chips("act", ACT, v => d.act === v)}</div>`;
-  html += `<div class="grp"><b>가장 많이 나가는 주류 <small>선택</small></b>${chips("drink", DRINK, v => d.drink === v)}</div>`;
+  else html += `<div class="grp"><b>적극성 <small>준비 정도가 없으면 직접 고릅니다</small></b>${chips("act", ACT, v => d.act === v)}</div>`;
+
+  html += `<h4>2 희망하는 다국어 지원 <small>여러 개 선택, 별표는 가장 원하는 1개</small></h4>`;
   if (act === "소극") {
     html += `<div class="rec none">소극으로 기록합니다. 희망 지원과 제품 추천은 묻지 않습니다</div>`;
   } else {
-    html += `<div class="grp"><b>희망하는 지원 <small>여러 개 선택, 별표는 가장 원하는 1개</small></b><div class="chips">${HELP.map(v => {
+    html += `<div class="grp"><div class="chips">${HELP.map(v => {
       const on = d.help.includes(v);
       return `<span style="display:inline-flex;gap:4px">${bt("help", v, on)}${on ? `<button class="b star${d.helpTop === v ? " on" : ""}" data-a="top" data-v="${esc(v)}" aria-label="가장 원하는 1개">★</button>` : ""}</span>`;
     }).join("")}</div></div>`;
   }
 
-  html += `<h4>3 NAB <small>업주 수요와 냉장고에서 본 NAB</small></h4>
-    <div class="grp"><b>NAB 수요 <small>논알콜 문의나 주문을 받은 적</small></b><div class="seg">${NAB.map(v => bt("nab", v, d.nab === v)).join("")}</div></div>
-    <div class="grp"><b>현재 취급 NAB <small>중복 선택, 없으면 "없음"</small></b>${d.nabPrior.length ? `<div class="muted" style="margin:0 0 6px">기존 조사 기록: ${esc(d.nabPrior.join(", "))} (활동 전 자료라 미리 채우지 않았습니다. 지금 냉장고 기준으로 골라 주세요)</div>` : ""}<div class="chips">${NABHAVE.map(v => bt("nabh", v, d.nabHave.includes(v))).join("")}</div></div>`;
+  html += `<h4>3 NAB에 대한 수요의 정도 <small>논알콜 문의나 주문을 받은 적</small></h4>
+    <div class="grp"><div class="seg">${NAB.map(v => bt("nab", v, d.nab === v)).join("")}</div></div>
+    <div class="grp"><b>현재 취급 NAB <small>냉장고에서 본 것, 중복 선택, 없으면 "없음"</small></b>${d.nabPrior.length ? `<div class="muted" style="margin:0 0 6px">기존 조사 기록: ${esc(d.nabPrior.join(", "))} (활동 전 자료라 미리 채우지 않았습니다. 지금 냉장고 기준으로 골라 주세요)</div>` : ""}<div class="chips">${NABHAVE.map(v => bt("nabh", v, d.nabHave.includes(v))).join("")}</div></div>`;
   if (act !== "소극") {
     const r = recommend(d);
     html += r ? `<div class="rec">규칙 추천 <b>${r.rec}</b><br>${esc(r.note)}</div>
       <div class="grp"><b>최종 추천</b><div class="seg">${FINAL.map(v => bt("final", v, (d.final || r.rec) === v)).join("")}</div></div>
       ${(d.final && d.final !== r.rec) ? `<label class="in">추천을 바꾼 사유<input id="why" type="text" value="${esc(d.why)}" placeholder="한 줄" autocomplete="off"></label>` : ""}`
-      : `<div class="rec none">NAB 수요를 고르면 추천이 자동으로 나옵니다</div>`;
+      : `<div class="rec none">NAB에 대한 수요의 정도를 고르면 추천이 자동으로 나옵니다</div>`;
   }
 
-  html += `<h4>4 POCM <small>매장 안팎의 주류 홍보물. 안 골랐으면 비워 둡니다</small></h4>
-    ${POCM.map(x => `<div class="prow"><span class="lbl">${esc(x.label)}<small>${esc(x.sub)}</small></span>${bt(x.d, "있음", d[x.d] === "있음")}${bt(x.d, "없음", d[x.d] === "없음")}</div>`).join("")}`;
   html += `<label class="in">메모<textarea id="memo" placeholder="선택">${esc(d.memo)}</textarea></label>
     <p class="muted" style="margin-top:12px">비워 둔 칸이 있어도 저장됩니다. 나중에 다시 열어 채울 수 있습니다</p>
     <button class="save" data-a="save" style="margin-top:6px">완료로 저장</button>`;
@@ -454,8 +448,6 @@ function onSheetClick(e) {
     case "lvs": draft.L[i].ours = !draft.L[i].ours; draft.coded[i] = false; break;
     case "lang": toggle(draft.L[i].langs, v); draft.coded[i] = false; break;
     case "act": draft.act = v; break;
-    case "drink": draft.drink = v; break;
-    case "pr": case "po": draft[a] = draft[a] === v ? "" : v; break;
     case "help": toggle(draft.help, v); if (!draft.help.includes(v) && draft.helpTop === v) draft.helpTop = ""; break;
     case "top": draft.helpTop = draft.helpTop === v ? "" : v; break;
     case "nab": draft.nab = v; break;
@@ -492,12 +484,10 @@ function buildItem() {
   const rec = recommend(d);
   if (act !== "소극" && !d.nab) miss.push("NAB 수요");
   if (!d.nabHave.length) miss.push("현재 취급 NAB");
-  if (!d.pr) miss.push("경쟁사 POCM");
-  if (!d.po) miss.push("우리 POCM");
   lastMiss = miss;
   Object.assign(item, { "상태": "완료", "제외 사유": "", "재방문 사유": "", "재방문 시각": "", "메모": d.memo.trim(),
-    "ASIS 단계": "L" + stageOf(d, "orig"), "TOBE 단계": "L" + stageOf(d, "all"), "적극성": act, "1순위 주류": d.drink,
-    "NAB 수요": d.nab, "현재 취급 NAB": d.nabHave.join(", "), "경쟁 제로": rivalOf(d), "경쟁사 POCM": d.pr, "우리 POCM": d.po });
+    "ASIS 단계": "L" + stageOf(d, "orig"), "TOBE 단계": "L" + stageOf(d, "all"), "적극성": act,
+    "NAB 수요": d.nab, "현재 취급 NAB": d.nabHave.join(", "), "경쟁 제로": rivalOf(d) });
   LEVELS.forEach((lv, i) => { item[lv.col] = levelValue(d.L[i]); });
   if (act === "소극") {
     Object.assign(item, { "희망 지원": "", "가장 원하는 지원": "", "규칙 추천": "", "최종 추천": "", "추천 사유": "" });
