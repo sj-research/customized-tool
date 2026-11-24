@@ -13,9 +13,11 @@ const VIEWS = { all: [37.5712, 127.0165, 5], ddm: [37.5690, 127.0092, 4], sin: [
 const ZONE_COLOR = {
   D1: "#4363d8", D2: "#f032e6", D3: "#e6194b", D4: "#9a6324", S1: "#1f3a5f",
 };
-// 구역으로 나누지 않고 업장 표시로만 구분하는 묶음. 세모 세 가지 색 (10월 18일 2차 재구성)
-const TAG_CLASS = { "감성 맛집": "tg1", "오래된 로컬": "tg2", "풍물시장 푸드코트": "tg3" };
-const TAG_COLOR = { "감성 맛집": "#e6007e", "오래된 로컬": "#6b3e00", "풍물시장 푸드코트": "#c9a100" };
+// 업장 표시. 블로그 노출 54곳 중 신설동 20곳(data/blog-sinseol.json)을 핑크 세모로 표시한다 (11월 24일)
+// 시트 places의 "TOBE 태그"(감성 맛집, 오래된 로컬, 풍물시장 푸드코트)는 이 화면에서 쓰지 않는다. 현장 지도는 그대로 쓴다
+const TAG_CLASS = { "블로그": "tg1" };
+const TAG_COLOR = { "블로그": "#e6007e" };
+const BLOG_TAG = "블로그";
 // 현장 지도(field.js)와 같은 진행상태 색과 매핑
 const STATUS_ORDER = ["미조사", "완료", "관리", "재방문", "제외"];
 const STATUS_COLOR = { "미조사": "#e8590c", "완료": "#2b8a3e", "관리": "#1864ab", "재방문": "#c2255c", "제외": "#868e96" };
@@ -31,7 +33,7 @@ const appStatus = p => {
   return isChecked(p["관리"]) && base !== "제외" ? "관리" : base;
 };
 
-let ZONES = [], zoneById = {}, zoneFeatures = [], places = [], fetchedAt = "";
+let ZONES = [], zoneById = {}, zoneFeatures = [], places = [], fetchedAt = "", blogIds = new Set();
 let mode = "zones", map = null, homed = false, bubble = null;
 const layers = { polys: [], labels: [], dots: [], marks: [] };
 
@@ -113,7 +115,7 @@ function drawPolygons(colored) {
   });
 }
 
-// 이름은 그 구역 업장들의 가운데(중앙값)에 단다. 업장이 없으면 폴리곤 꼭짓점 평균. S3, S4는 폴리곤이 없어 달지 않는다
+// 이름은 그 구역 업장들의 가운데(중앙값)에 단다. 업장이 없으면 폴리곤 꼭짓점 평균
 function drawLabels(list, colored) {
   clear("labels");
   ZONES.forEach(z => {
@@ -189,7 +191,7 @@ function renderSurvey() {
     + tagLegend() + stamp();
 }
 
-// 태그 범례. 세모 세 가지 색
+// 태그 범례. 핑크 세모
 function tagLegend() {
   return Object.keys(TAG_COLOR).map(t => {
     const n = places.filter(p => p._tag === t).length;
@@ -231,9 +233,11 @@ async function load() {
   zoneById = Object.fromEntries(ZONES.map(z => [z.zone_id, z]));
   zoneFeatures = parseFeatures(ZONES);
   // 좌표가 있고 진행상태를 아는 업장만 본다. 삭제는 조사 대상이 아니라 빠진다 (현장 지도와 같은 규칙)
+  // 블로그 목록은 화면 옆 파일이다. 못 읽어도 지도는 그대로 그린다
+  try { blogIds = new Set((await (await fetch("data/blog-sinseol.json", { cache: "no-cache" })).json()).ids || []); } catch (e) { blogIds = new Set(); }
   places = (data.places || [])
     .filter(p => p.lat !== "" && p.lat !== null && p.lng !== "" && p.lng !== null && SHEET_TO_APP[p["진행상태"]])
-    .map(p => ({ ...p, _tag: p["TOBE 태그"] || "" }));
+    .map(p => ({ ...p, _tag: blogIds.has(String(p.place_id).trim()) ? BLOG_TAG : "" }));
   if (!ZONES.length) fail("시트 zones 탭에 TOBE 구역이 없습니다");
   setMode(mode);
 }
